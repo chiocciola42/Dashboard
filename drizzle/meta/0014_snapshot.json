@@ -1,5 +1,5 @@
 {
-  "id": "8ec2eda5-5e43-4989-8d54-4fb6a25683b2",
+  "id": "2739fb57-03f7-4e28-b6fc-03db42105cc0",
   "prevId": "0c6ae2de-c3a6-4ac5-a11b-63ef457ee5db",
   "version": "7",
   "dialect": "postgresql",
@@ -2282,6 +2282,12 @@
         "fattura_id": {
           "name": "fattura_id",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "data_pagamento": {
+          "name": "data_pagamento",
+          "type": "date",
           "primaryKey": false,
           "notNull": false
         }

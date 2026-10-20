@@ -628,6 +628,7 @@ export const righe_bef = pgTable(
     fornitore_id: integer('fornitore_id').references(() => fornitori.id),
     importo: numeric('importo', { precision: 15, scale: 4 }),
     fattura_id: integer('fattura_id').references(() => fatture.id),
+    data_pagamento: date('data_pagamento'),
   },
   (t) => ({
     befIdx: index('righe_bef_bef_idx').on(t.bef_id),

@@ -2,6 +2,7 @@
 import React, { useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { uploadSapRows, ifRowsFrom } from '@/lib/sapClient';
 
 function detectKind(name: string): string {
   const n = name.toLowerCase();
@@ -72,6 +73,7 @@ export default function UploadPage() {
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
   const [drag, setDrag] = useState(false);
+  const [sap, setSap] = useState<{ ok: boolean; tipo: string; righe: number; bdo: number; error?: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const kind = file ? detectKind(file.name) : '';
@@ -80,6 +82,7 @@ export default function UploadPage() {
     if (!file) return;
     setBusy(true);
     setResult(null);
+    setSap(null);
     setProgress(10);
     try {
       // Parse the spreadsheet in the browser and send only the extracted
@@ -88,6 +91,29 @@ export default function UploadPage() {
       const { parseFile } = await import('@/lib/parsers');
       setProgress(30);
       const ab = await file.arrayBuffer();
+
+      // Report SAL/PDC/BEF/Apertura/Subentro: modello Contratto → Fornitore → BdO.
+      // Si riconoscono dal foglio dati, non dal nome del file.
+      const { parseSapFile } = await import('@/lib/parsers/sap');
+      let sapParsed = null;
+      try {
+        sapParsed = parseSapFile(ab);
+      } catch {
+        /* non è un report SAP: si prosegue con i parser storici */
+      }
+      if (sapParsed) {
+        const out = await uploadSapRows({
+          kind: sapParsed.kind,
+          rows: sapParsed.rows,
+          filename: file.name,
+          token,
+          onProgress: (d, t) => setProgress(30 + Math.round((d / t) * 65)),
+        });
+        setSap({ ...out, tipo: sapParsed.kind });
+        setProgress(100);
+        if (out.ok) router.refresh();
+        return;
+      }
       let parsed;
       try {
         parsed = parseFile(file.name, ab);
@@ -132,7 +158,15 @@ export default function UploadPage() {
       // The dashboard renders from SSR data and never refetches on its own;
       // invalidate the Next.js Router Cache so navigating back to it shows the
       // freshly-uploaded values instead of a cached (stale) render.
-      if (data.ok) router.refresh();
+      if (data.ok) {
+        // File IF/Dashboard: le IF alimentano anche il modello per contratto
+        // (associazione 1:1 BdO–IF). Best effort: senza database resta solo il percorso storico.
+        if (parsed.interventi?.length) {
+          const out = await uploadSapRows({ kind: 'if', rows: ifRowsFrom(parsed.interventi), filename: file.name, token });
+          if (out.ok) setSap({ ...out, tipo: 'if' });
+        }
+        router.refresh();
+      }
     } catch {
       setResult({ ok: false, error: 'Errore di rete durante l’upload' });
     } finally {
@@ -229,6 +263,25 @@ export default function UploadPage() {
       {progress > 0 && (
         <div className="progress">
           <span style={{ transform: `scaleX(${progress / 100})` }} />
+        </div>
+      )}
+
+      {sap && (
+        <div className="uplog">
+          {sap.ok ? (
+            <>
+              <div className="row"><span>Esito</span><b style={{ color: 'var(--good)' }}>OK · {sap.tipo}</b></div>
+              <div className="row"><span>Righe lette</span><b>{sap.righe}</b></div>
+              <div className="row"><span>BdO interessati</span><b>{sap.bdo}</b></div>
+              <div style={{ marginTop: 12 }}>
+                <Link href="/contratti?tutti=1" className="hdr-link" style={{ color: 'var(--petrol-d)' }} onClick={() => router.refresh()}>
+                  → Vai ai contratti
+                </Link>
+              </div>
+            </>
+          ) : (
+            <div className="row"><span>Errore</span><b style={{ color: 'var(--bad)' }}>{sap.error}</b></div>
+          )}
         </div>
       )}
 

@@ -135,7 +135,8 @@ CREATE TABLE IF NOT EXISTS "righe_bef" (
 	"periodo" text,
 	"fornitore_id" integer,
 	"importo" numeric(15, 4),
-	"fattura_id" integer
+	"fattura_id" integer,
+	"data_pagamento" date
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "storico_modifiche" (

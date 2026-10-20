@@ -255,7 +255,8 @@ export const DDL_V2: string[] = [
 	"periodo" text,
 	"fornitore_id" integer,
 	"importo" numeric(15, 4),
-	"fattura_id" integer
+	"fattura_id" integer,
+	"data_pagamento" date
 );`,
   `CREATE TABLE IF NOT EXISTS "storico_modifiche" (
 	"id" serial PRIMARY KEY NOT NULL,

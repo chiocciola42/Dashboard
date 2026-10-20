@@ -61,3 +61,27 @@ describe('import SAP e cambio contratto', () => {
     expect(l.reduce((a, c) => a + c.n_bdo, 0)).toBe(2);
   });
 });
+
+describe('verbali e associazione IF', () => {
+  it('importa verbali per tipo e associa 1:1 le IF segnalando i conflitti', async () => {
+    const { db } = await createTestDb();
+    await applySchema(db as never);
+    const { importVerbali, importIf } = await import('@/lib/importer');
+    await importVerbali(db as never, 'sal', [
+      { tipo: 'sal', bdo: '1', descrizione: null, codifica: 'Z1', periodo: '01/2026', stato: 'Firmato', fornitore: 'Intellera SpA', data_firma: '2026-02-01', dettagli: {} },
+    ]);
+    await importVerbali(db as never, 'sal', [
+      { tipo: 'sal', bdo: '1', descrizione: null, codifica: 'Z1', periodo: '01/2026', stato: 'Firmato', fornitore: 'Intellera SpA', data_firma: '2026-02-01', dettagli: {} },
+    ]);
+    const row = (n: string, bdo: string) => ({ numero_if: n, bdo, titolo: 't', ambito: null, modalita: null, azione: null, note: null });
+    const a = await importIf(db as never, [row('I1', '1'), row('I2', '2')]);
+    expect(a.conflitti).toEqual([]);
+    const b = await importIf(db as never, [row('I1', '2'), row('I3', '1')]);
+    expect(b.conflitti).toHaveLength(2);
+    const { sql } = await import('drizzle-orm');
+    const v = await db.execute(sql`select count(*)::int n from verbali`);
+    expect((v.rows[0] as { n: number }).n).toBe(1);
+    const asc = await db.execute(sql`select count(*)::int n from associazioni_bdo_if`);
+    expect((asc.rows[0] as { n: number }).n).toBe(2);
+  }, 60000);
+});

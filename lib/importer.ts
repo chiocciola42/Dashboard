@@ -244,23 +244,21 @@ export async function importBef(db: Db, rows: BefRow[]): Promise<ImportSummary> 
     fornitore_id: fid(ctx, r.fornitore),
     importo: money(r.importo),
     fattura_id: r.fattura ? fattIds.get(r.fattura) ?? null : null,
+    data_pagamento: r.data_pagamento,
   }));
   for (const part of chunks(righe)) await db.insert(s.righe_bef).values(part);
 
   // Pagamento = somma delle righe della fattura incassate in una certa data.
-  const pag = new Map<string, { fattura_id: number; data_pagamento: string; importo: number }>();
-  for (const r of rows) {
-    if (!r.fattura || !r.data_pagamento) continue;
-    const fattura_id = fattIds.get(r.fattura)!;
-    const k = `${fattura_id}|${r.data_pagamento}`;
-    const cur = pag.get(k) ?? { fattura_id, data_pagamento: r.data_pagamento, importo: 0 };
-    cur.importo += r.importo;
-    pag.set(k, cur);
-  }
-  const pagFatt = [...new Set([...pag.values()].map((p) => p.fattura_id))];
-  for (const part of chunks(pagFatt)) await db.delete(s.pagamenti).where(inArray(s.pagamenti.fattura_id, part));
-  for (const part of chunks([...pag.values()])) {
-    await db.insert(s.pagamenti).values(part.map((p) => ({ ...p, importo: money(p.importo) })));
+  // Si ricostruisce dal DB per le fatture toccate: una fattura può coprire BdO
+  // caricati in richieste diverse e il risultato deve restare corretto.
+  const fattureToccate = [...fattIds.values()];
+  for (const part of chunks(fattureToccate)) {
+    await db.delete(s.pagamenti).where(inArray(s.pagamenti.fattura_id, part));
+    await db.execute(sql`
+      insert into pagamenti (fattura_id, data_pagamento, importo)
+      select fattura_id, data_pagamento, sum(importo) from righe_bef
+      where fattura_id in ${part} and data_pagamento is not null
+      group by fattura_id, data_pagamento`);
   }
   await refreshStatoBdo(db);
   return { tipo: 'bef', righe_lette: rows.length, bdo: ctx.bdoIds.size, contratti: ctx.contrattoIds.size, fornitori: ctx.fornitoreIds.size };
@@ -340,6 +338,12 @@ export async function importIf(db: Db, rows: IfRow[]): Promise<ImportSummary & {
   return { tipo: 'if', righe_lette: rows.length, bdo: bdoIds.size, contratti: 0, fornitori: 0, conflitti };
 }
 
+export async function importSapRows(db: Db, parsed: ParsedSap): Promise<ImportSummary> {
+  return parsed.kind === 'pdc' ? importPdc(db, parsed.rows)
+    : parsed.kind === 'bef' ? importBef(db, parsed.rows)
+    : importVerbali(db, parsed.kind, parsed.rows);
+}
+
 // Entry point per un file SAP: riconosce il tipo dal foglio, importa e
 // registra l'esito in importazioni_sap.
 export async function importSapFile(
@@ -352,10 +356,7 @@ export async function importSapFile(
   if (!parsed) return null;
   const hash = createHash('sha256').update(new Uint8Array(buf as ArrayBuffer)).digest('hex');
   try {
-    const summary =
-      parsed.kind === 'pdc' ? await importPdc(db, parsed.rows)
-      : parsed.kind === 'bef' ? await importBef(db, parsed.rows)
-      : await importVerbali(db, parsed.kind, parsed.rows);
+    const summary = await importSapRows(db, parsed);
     await db.insert(s.importazioni_sap).values({ nome_file: nomeFile, tipo: parsed.kind, hash, righe_lette: summary.righe_lette, utente });
     return summary;
   } catch (e) {
