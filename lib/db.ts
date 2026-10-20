@@ -764,11 +764,11 @@ export const DDL: string[] = [
       CHECK ("bef_status" IS NULL OR "bef_status" IN ('ok','ko','prog','nd')) NOT VALID;
   EXCEPTION WHEN duplicate_object THEN NULL;
   END $$`,
+  ...DDL_V2,
   // Repair IF/BO identifiers persisted as a JS Date string (DATE_ID_REPAIRS above).
   ...DATE_ID_REPAIRS,
   // Must come after the repairs: it copies numero_if.
   INTERVENTO_MESI_BACKFILL,
-  ...DDL_V2,
 ];
 
 // Bump this whenever the DDL array above changes (new table, new column, new
