@@ -99,6 +99,13 @@
       "when": 1788451200000,
       "tag": "0013_intervento_mesi",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792497425685,
+      "tag": "0014_contratto_fornitore_bdo",
+      "breakpoints": true
     }
   ]
 }

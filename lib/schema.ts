@@ -436,3 +436,246 @@ export const intervento_mesi = pgTable(
     mese_check: check('intervento_mesi_mese_check', sql`${t.mese} BETWEEN 1 AND 12`),
   }),
 );
+
+// ---------------------------------------------------------------------------
+// Modello Contratto → Fornitore → BdO/IF (v2)
+// ---------------------------------------------------------------------------
+// Le tabelle legacy sopra (interventi, report_*, bef_records, verbali_*,
+// config_rti, intervento_mesi) restano in sola lettura come archivio. Le
+// colonne marcate "SAP" sono scritte solo dall'importazione e sovrascritte ad
+// ogni upload; quelle "APP" sono gestite dagli utenti e un import non le tocca.
+
+export const clienti = pgTable('clienti', {
+  id: serial('id').primaryKey(),
+  nome: text('nome').unique().notNull(),
+  created_at: timestamp('created_at').defaultNow(),
+});
+
+export const contratti = pgTable('contratti', {
+  id: serial('id').primaryKey(),
+  codice: text('codice').unique().notNull(),
+  cliente_id: integer('cliente_id').references(() => clienti.id),
+  descrizione: text('descrizione'),
+  cig: text('cig'),
+  massimale: numeric('massimale', { precision: 18, scale: 4 }),
+  created_at: timestamp('created_at').defaultNow(),
+});
+
+export const fornitori = pgTable('fornitori', {
+  id: serial('id').primaryKey(),
+  nome: text('nome').unique().notNull(),
+  created_at: timestamp('created_at').defaultNow(),
+});
+
+export const contratti_fornitori = pgTable(
+  'contratti_fornitori',
+  {
+    contratto_id: integer('contratto_id')
+      .notNull()
+      .references(() => contratti.id),
+    fornitore_id: integer('fornitore_id')
+      .notNull()
+      .references(() => fornitori.id),
+    ruolo: text('ruolo').notNull().default('Altro'), // Mandataria | Mandante | Altro
+    quota_contrattuale: numeric('quota_contrattuale', { precision: 18, scale: 4 }), // facoltativa, mai usata per ripartire importi
+    attivo: boolean('attivo').notNull().default(true),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.contratto_id, t.fornitore_id], name: 'contratti_fornitori_pk' }),
+    ruoloCheck: check('contratti_fornitori_ruolo_check', sql`${t.ruolo} in ('Mandataria','Mandante','Altro')`),
+  }),
+);
+
+export const buoni_ordine = pgTable(
+  'buoni_ordine',
+  {
+    id: serial('id').primaryKey(),
+    numero_bdo: text('numero_bdo').unique().notNull(),
+    contratto_id: integer('contratto_id').references(() => contratti.id),
+    descrizione: text('descrizione'), // SAP
+    stato: text('stato').notNull().default('da_riconciliare'),
+    dati_sap: jsonb('dati_sap').$type<Record<string, unknown>>(), // SAP: workflow ROI/PMO/CTRM, divisione, centro di costo…
+    note: text('note'), // APP
+    updated_at: timestamp('updated_at').defaultNow(),
+  },
+  (t) => ({
+    statoCheck: check('buoni_ordine_stato_check', sql`${t.stato} in ('validato','da_riconciliare')`),
+    contrattoIdx: index('buoni_ordine_contratto_idx').on(t.contratto_id),
+  }),
+);
+
+export const interventi_fornitura = pgTable('interventi_fornitura', {
+  id: serial('id').primaryKey(),
+  numero_if: text('numero_if').unique().notNull(),
+  titolo: text('titolo'),
+  ambito: text('ambito'), // APP
+  modalita: text('modalita'), // APP
+  azione: text('azione'), // APP
+  note: text('note'), // APP
+  updated_at: timestamp('updated_at').defaultNow(),
+});
+
+export const associazioni_bdo_if = pgTable(
+  'associazioni_bdo_if',
+  {
+    id: serial('id').primaryKey(),
+    bdo_id: integer('bdo_id')
+      .notNull()
+      .unique()
+      .references(() => buoni_ordine.id),
+    if_id: integer('if_id')
+      .notNull()
+      .unique()
+      .references(() => interventi_fornitura.id),
+    data_associazione: timestamp('data_associazione').notNull().defaultNow(),
+    origine_associazione: text('origine_associazione').notNull().default('SAP'),
+  },
+  (t) => ({
+    origineCheck: check(
+      'associazioni_bdo_if_origine_check',
+      sql`${t.origine_associazione} in ('SAP','Manuale','Importazione')`,
+    ),
+  }),
+);
+
+// Attribuzione economica al fornitore: avviene sulla singola posizione.
+export const posizioni_bdo = pgTable(
+  'posizioni_bdo',
+  {
+    id: serial('id').primaryKey(),
+    bdo_id: integer('bdo_id')
+      .notNull()
+      .references(() => buoni_ordine.id),
+    posizione: text('posizione').notNull(),
+    fornitore_id: integer('fornitore_id').references(() => fornitori.id),
+    descrizione: text('descrizione'),
+    importo: numeric('importo', { precision: 15, scale: 4 }),
+  },
+  (t) => ({
+    uq: uniqueIndex('posizioni_bdo_bdo_posizione_unique').on(t.bdo_id, t.posizione),
+  }),
+);
+
+export const piani_consegna = pgTable(
+  'piani_consegna',
+  {
+    id: serial('id').primaryKey(),
+    bdo_id: integer('bdo_id')
+      .notNull()
+      .references(() => buoni_ordine.id),
+    posizione: text('posizione').notNull(),
+    periodo: text('periodo').notNull(),
+    fornitore_id: integer('fornitore_id').references(() => fornitori.id),
+    codice_pdc: text('codice_pdc'),
+    stato: text('stato'),
+    importo: numeric('importo', { precision: 15, scale: 4 }),
+    data_approvazione: date('data_approvazione'),
+  },
+  (t) => ({
+    uq: uniqueIndex('piani_consegna_bdo_pos_periodo_unique').on(t.bdo_id, t.posizione, t.periodo),
+  }),
+);
+
+export const verbali = pgTable(
+  'verbali',
+  {
+    id: serial('id').primaryKey(),
+    bdo_id: integer('bdo_id')
+      .notNull()
+      .references(() => buoni_ordine.id),
+    tipo: text('tipo').notNull(), // apertura | sal | chiusura
+    codifica: text('codifica').notNull().default(''),
+    periodo: text('periodo'),
+    stato: text('stato'),
+    fornitore_id: integer('fornitore_id').references(() => fornitori.id),
+    data_firma: date('data_firma'),
+    dettagli: jsonb('dettagli').$type<Record<string, unknown>>(), // dettaglio SAL (conformità, criticità, livelli di servizio)
+  },
+  (t) => ({
+    tipoCheck: check('verbali_tipo_check', sql`${t.tipo} in ('apertura','sal','chiusura')`),
+    uq: uniqueIndex('verbali_bdo_tipo_codifica_periodo_unique').on(t.bdo_id, t.tipo, t.codifica, sql`coalesce(${t.periodo}, '')`),
+  }),
+);
+
+export const benestari_fatturazione = pgTable(
+  'benestari_fatturazione',
+  {
+    id: serial('id').primaryKey(),
+    bdo_id: integer('bdo_id')
+      .notNull()
+      .references(() => buoni_ordine.id),
+    periodo: text('periodo').notNull().default(''),
+    descrizione: text('descrizione'),
+  },
+  (t) => ({
+    uq: uniqueIndex('benestari_bdo_periodo_unique').on(t.bdo_id, t.periodo),
+  }),
+);
+
+export const righe_bef = pgTable(
+  'righe_bef',
+  {
+    id: serial('id').primaryKey(),
+    bef_id: integer('bef_id')
+      .notNull()
+      .references(() => benestari_fatturazione.id),
+    posizione: text('posizione').notNull().default(''),
+    fornitore_id: integer('fornitore_id').references(() => fornitori.id),
+    importo: numeric('importo', { precision: 15, scale: 4 }),
+    fattura_id: integer('fattura_id'),
+  },
+  (t) => ({
+    uq: uniqueIndex('righe_bef_bef_posizione_fattura_unique').on(t.bef_id, t.posizione, sql`coalesce(${t.fattura_id}, 0)`),
+  }),
+);
+
+export const fatture = pgTable('fatture', {
+  id: serial('id').primaryKey(),
+  numero: text('numero').unique().notNull(),
+  data_fattura: date('data_fattura'),
+});
+
+export const pagamenti = pgTable(
+  'pagamenti',
+  {
+    id: serial('id').primaryKey(),
+    fattura_id: integer('fattura_id')
+      .notNull()
+      .references(() => fatture.id),
+    data_pagamento: date('data_pagamento').notNull(),
+    importo: numeric('importo', { precision: 15, scale: 4 }),
+  },
+  (t) => ({
+    uq: uniqueIndex('pagamenti_fattura_data_unique').on(t.fattura_id, t.data_pagamento),
+  }),
+);
+
+export const importazioni_sap = pgTable('importazioni_sap', {
+  id: serial('id').primaryKey(),
+  nome_file: text('nome_file').notNull(),
+  tipo: text('tipo').notNull(),
+  hash: text('hash'),
+  esito: text('esito').notNull().default('ok'), // ok | errore
+  righe_lette: integer('righe_lette').default(0),
+  righe_scartate: integer('righe_scartate').default(0),
+  messaggio: text('messaggio'),
+  utente: text('utente'),
+  created_at: timestamp('created_at').notNull().defaultNow(),
+});
+
+export const storico_modifiche = pgTable(
+  'storico_modifiche',
+  {
+    id: serial('id').primaryKey(),
+    entita: text('entita').notNull(), // es. 'buoni_ordine'
+    entita_id: integer('entita_id').notNull(),
+    campo: text('campo').notNull(),
+    valore_precedente: text('valore_precedente'),
+    valore_nuovo: text('valore_nuovo'),
+    utente: text('utente'),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    entitaIdx: index('storico_modifiche_entita_idx').on(t.entita, t.entita_id),
+  }),
+);
