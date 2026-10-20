@@ -567,12 +567,13 @@ export const piani_consegna = pgTable(
     periodo: text('periodo').notNull(),
     fornitore_id: integer('fornitore_id').references(() => fornitori.id),
     codice_pdc: text('codice_pdc'),
+    prestazione: text('prestazione'), // Numero Prestazioni: più righe PDC condividono posizione e periodo
     stato: text('stato'),
-    importo: numeric('importo', { precision: 15, scale: 4 }),
+    importo: numeric('importo', { precision: 15, scale: 4 }), // importo avanzamento
     data_approvazione: date('data_approvazione'),
   },
   (t) => ({
-    uq: uniqueIndex('piani_consegna_bdo_pos_periodo_unique').on(t.bdo_id, t.posizione, t.periodo),
+    bdoIdx: index('piani_consegna_bdo_idx').on(t.bdo_id),
   }),
 );
 
@@ -583,7 +584,7 @@ export const verbali = pgTable(
     bdo_id: integer('bdo_id')
       .notNull()
       .references(() => buoni_ordine.id),
-    tipo: text('tipo').notNull(), // apertura | sal | chiusura
+    tipo: text('tipo').notNull(), // apertura | sal | chiusura | subentro
     codifica: text('codifica').notNull().default(''),
     periodo: text('periodo'),
     stato: text('stato'),
@@ -592,7 +593,7 @@ export const verbali = pgTable(
     dettagli: jsonb('dettagli').$type<Record<string, unknown>>(), // dettaglio SAL (conformità, criticità, livelli di servizio)
   },
   (t) => ({
-    tipoCheck: check('verbali_tipo_check', sql`${t.tipo} in ('apertura','sal','chiusura')`),
+    tipoCheck: check('verbali_tipo_check', sql`${t.tipo} in ('apertura','sal','chiusura','subentro')`),
     uq: uniqueIndex('verbali_bdo_tipo_codifica_periodo_unique').on(t.bdo_id, t.tipo, t.codifica, sql`coalesce(${t.periodo}, '')`),
   }),
 );
@@ -604,11 +605,12 @@ export const benestari_fatturazione = pgTable(
     bdo_id: integer('bdo_id')
       .notNull()
       .references(() => buoni_ordine.id),
-    periodo: text('periodo').notNull().default(''),
+    numero_benestare: text('numero_benestare').notNull(), // "Benestare alla Fatturazione"
+    periodo: text('periodo'),
     descrizione: text('descrizione'),
   },
   (t) => ({
-    uq: uniqueIndex('benestari_bdo_periodo_unique').on(t.bdo_id, t.periodo),
+    uq: uniqueIndex('benestari_bdo_numero_unique').on(t.bdo_id, t.numero_benestare),
   }),
 );
 
@@ -619,13 +621,17 @@ export const righe_bef = pgTable(
     bef_id: integer('bef_id')
       .notNull()
       .references(() => benestari_fatturazione.id),
-    posizione: text('posizione').notNull().default(''),
+    posizione: text('posizione').notNull().default(''), // Numero Linea Ordine
+    ricezione: text('ricezione'),
+    linea_ricezione: text('linea_ricezione'),
+    periodo: text('periodo'), // Periodo Competenza
     fornitore_id: integer('fornitore_id').references(() => fornitori.id),
     importo: numeric('importo', { precision: 15, scale: 4 }),
-    fattura_id: integer('fattura_id'),
+    fattura_id: integer('fattura_id').references(() => fatture.id),
   },
   (t) => ({
-    uq: uniqueIndex('righe_bef_bef_posizione_fattura_unique').on(t.bef_id, t.posizione, sql`coalesce(${t.fattura_id}, 0)`),
+    befIdx: index('righe_bef_bef_idx').on(t.bef_id),
+    fatturaIdx: index('righe_bef_fattura_idx').on(t.fattura_id),
   }),
 );
 

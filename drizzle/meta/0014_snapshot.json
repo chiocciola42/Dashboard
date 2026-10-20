@@ -1,5 +1,5 @@
 {
-  "id": "5127480b-fa93-4361-9454-11fe2261d85f",
+  "id": "8ec2eda5-5e43-4989-8d54-4fb6a25683b2",
   "prevId": "0c6ae2de-c3a6-4ac5-a11b-63ef457ee5db",
   "version": "7",
   "dialect": "postgresql",
@@ -315,12 +315,17 @@
           "primaryKey": false,
           "notNull": true
         },
+        "numero_benestare": {
+          "name": "numero_benestare",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "periodo": {
           "name": "periodo",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "''"
+          "notNull": false
         },
         "descrizione": {
           "name": "descrizione",
@@ -330,8 +335,8 @@
         }
       },
       "indexes": {
-        "benestari_bdo_periodo_unique": {
-          "name": "benestari_bdo_periodo_unique",
+        "benestari_bdo_numero_unique": {
+          "name": "benestari_bdo_numero_unique",
           "columns": [
             {
               "expression": "bdo_id",
@@ -340,7 +345,7 @@
               "nulls": "last"
             },
             {
-              "expression": "periodo",
+              "expression": "numero_benestare",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1517,6 +1522,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "prestazione": {
+          "name": "prestazione",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "stato": {
           "name": "stato",
           "type": "text",
@@ -1537,29 +1548,17 @@
         }
       },
       "indexes": {
-        "piani_consegna_bdo_pos_periodo_unique": {
-          "name": "piani_consegna_bdo_pos_periodo_unique",
+        "piani_consegna_bdo_idx": {
+          "name": "piani_consegna_bdo_idx",
           "columns": [
             {
               "expression": "bdo_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            },
-            {
-              "expression": "posizione",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "periodo",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
             }
           ],
-          "isUnique": true,
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2250,6 +2249,24 @@
           "notNull": true,
           "default": "''"
         },
+        "ricezione": {
+          "name": "ricezione",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "linea_ricezione": {
+          "name": "linea_ricezione",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "periodo": {
+          "name": "periodo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "fornitore_id": {
           "name": "fornitore_id",
           "type": "integer",
@@ -2270,29 +2287,32 @@
         }
       },
       "indexes": {
-        "righe_bef_bef_posizione_fattura_unique": {
-          "name": "righe_bef_bef_posizione_fattura_unique",
+        "righe_bef_bef_idx": {
+          "name": "righe_bef_bef_idx",
           "columns": [
             {
               "expression": "bef_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            },
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "righe_bef_fattura_idx": {
+          "name": "righe_bef_fattura_idx",
+          "columns": [
             {
-              "expression": "posizione",
+              "expression": "fattura_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            },
-            {
-              "expression": "coalesce(\"fattura_id\", 0)",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
             }
           ],
-          "isUnique": true,
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2318,6 +2338,19 @@
           "tableTo": "fornitori",
           "columnsFrom": [
             "fornitore_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "righe_bef_fattura_id_fatture_id_fk": {
+          "name": "righe_bef_fattura_id_fatture_id_fk",
+          "tableFrom": "righe_bef",
+          "tableTo": "fatture",
+          "columnsFrom": [
+            "fattura_id"
           ],
           "columnsTo": [
             "id"
@@ -2740,7 +2773,7 @@
       "checkConstraints": {
         "verbali_tipo_check": {
           "name": "verbali_tipo_check",
-          "value": "\"verbali\".\"tipo\" in ('apertura','sal','chiusura')"
+          "value": "\"verbali\".\"tipo\" in ('apertura','sal','chiusura','subentro')"
         }
       },
       "isRLSEnabled": false

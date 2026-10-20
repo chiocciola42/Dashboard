@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS "associazioni_bdo_if" (
 CREATE TABLE IF NOT EXISTS "benestari_fatturazione" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"bdo_id" integer NOT NULL,
-	"periodo" text DEFAULT '' NOT NULL,
+	"numero_benestare" text NOT NULL,
+	"periodo" text,
 	"descrizione" text
 );
 --> statement-breakpoint
@@ -110,6 +111,7 @@ CREATE TABLE IF NOT EXISTS "piani_consegna" (
 	"periodo" text NOT NULL,
 	"fornitore_id" integer,
 	"codice_pdc" text,
+	"prestazione" text,
 	"stato" text,
 	"importo" numeric(15, 4),
 	"data_approvazione" date
@@ -128,6 +130,9 @@ CREATE TABLE IF NOT EXISTS "righe_bef" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"bef_id" integer NOT NULL,
 	"posizione" text DEFAULT '' NOT NULL,
+	"ricezione" text,
+	"linea_ricezione" text,
+	"periodo" text,
 	"fornitore_id" integer,
 	"importo" numeric(15, 4),
 	"fattura_id" integer
@@ -154,7 +159,7 @@ CREATE TABLE IF NOT EXISTS "verbali" (
 	"fornitore_id" integer,
 	"data_firma" date,
 	"dettagli" jsonb,
-	CONSTRAINT "verbali_tipo_check" CHECK ("verbali"."tipo" in ('apertura','sal','chiusura'))
+	CONSTRAINT "verbali_tipo_check" CHECK ("verbali"."tipo" in ('apertura','sal','chiusura','subentro'))
 );
 --> statement-breakpoint
 DO $$ BEGIN
@@ -242,6 +247,12 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
+ ALTER TABLE "righe_bef" ADD CONSTRAINT "righe_bef_fattura_id_fatture_id_fk" FOREIGN KEY ("fattura_id") REFERENCES "public"."fatture"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
  ALTER TABLE "verbali" ADD CONSTRAINT "verbali_bdo_id_buoni_ordine_id_fk" FOREIGN KEY ("bdo_id") REFERENCES "public"."buoni_ordine"("id") ON DELETE no action ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
@@ -253,17 +264,19 @@ EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
 --> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "benestari_bdo_periodo_unique" ON "benestari_fatturazione" USING btree ("bdo_id","periodo");
+CREATE UNIQUE INDEX IF NOT EXISTS "benestari_bdo_numero_unique" ON "benestari_fatturazione" USING btree ("bdo_id","numero_benestare");
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "buoni_ordine_contratto_idx" ON "buoni_ordine" USING btree ("contratto_id");
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "pagamenti_fattura_data_unique" ON "pagamenti" USING btree ("fattura_id","data_pagamento");
 --> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "piani_consegna_bdo_pos_periodo_unique" ON "piani_consegna" USING btree ("bdo_id","posizione","periodo");
+CREATE INDEX IF NOT EXISTS "piani_consegna_bdo_idx" ON "piani_consegna" USING btree ("bdo_id");
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "posizioni_bdo_bdo_posizione_unique" ON "posizioni_bdo" USING btree ("bdo_id","posizione");
 --> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "righe_bef_bef_posizione_fattura_unique" ON "righe_bef" USING btree ("bef_id","posizione",coalesce("fattura_id", 0));
+CREATE INDEX IF NOT EXISTS "righe_bef_bef_idx" ON "righe_bef" USING btree ("bef_id");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "righe_bef_fattura_idx" ON "righe_bef" USING btree ("fattura_id");
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "storico_modifiche_entita_idx" ON "storico_modifiche" USING btree ("entita","entita_id");
 --> statement-breakpoint
