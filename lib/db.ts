@@ -581,11 +581,30 @@ const SCHEMA_VERSION_KEY = 'schema_version';
 // production, an in-process Postgres in tests.
 export type SchemaDb = { execute(query: SQL): PromiseLike<unknown> };
 
+// Postgres SQLSTATE 42P01 (undefined_table): the relation does not exist yet.
+const PG_UNDEFINED_TABLE = '42P01';
+const MAX_ERROR_CAUSE_DEPTH = 4;
+
+// True when `e` (or an error it wraps, a few levels deep) is Postgres's "relation
+// does not exist" — the only failure that legitimately means "fresh database".
+export function isMissingRelationError(e: unknown): boolean {
+  let cur: unknown = e;
+  for (let depth = 0; depth < MAX_ERROR_CAUSE_DEPTH && cur && typeof cur === 'object'; depth++) {
+    const err = cur as { code?: unknown; message?: unknown; cause?: unknown };
+    if (err.code === PG_UNDEFINED_TABLE) return true;
+    if (typeof err.message === 'string' && /relation ".*" does not exist/i.test(err.message)) return true;
+    cur = err.cause;
+  }
+  return false;
+}
+
 // Reads the current schema_version from app_config with a single round-trip.
 // Returns null when the sentinel can't be read yet — either app_config
 // doesn't exist yet (fresh DB) or the key was never written — so the caller
-// knows it must run the full DDL bootstrap.
-async function readSchemaVersion(db: SchemaDb): Promise<number | null> {
+// knows it must run the full DDL bootstrap. Any other failure (network, auth,
+// timeout) is NOT "fresh DB": it propagates, so a transient blip fails the
+// request instead of silently re-running the whole DDL.
+export async function readSchemaVersion(db: SchemaDb): Promise<number | null> {
   try {
     const result = (await db.execute(
       sql`select value from app_config where key = ${SCHEMA_VERSION_KEY} limit 1`,
@@ -594,9 +613,10 @@ async function readSchemaVersion(db: SchemaDb): Promise<number | null> {
     if (!rows.length || rows[0].value == null) return null;
     const v = Number(rows[0].value);
     return Number.isFinite(v) ? v : null;
-  } catch {
+  } catch (e) {
     // app_config doesn't exist yet on a brand-new database.
-    return null;
+    if (isMissingRelationError(e)) return null;
+    throw e;
   }
 }
 
