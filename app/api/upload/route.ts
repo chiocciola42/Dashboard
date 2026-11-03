@@ -30,6 +30,18 @@ import type {
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+// Hard ceiling on rows accepted per record list in a single upload: bounds the
+// work (and memory) any one request can trigger.
+const MAX_ROWS_PER_LIST = 50_000;
+
+// Returns the list as an array, or null when it is not an array or exceeds
+// MAX_ROWS_PER_LIST. `undefined` (field absent) is an empty list.
+function boundedList(v: unknown): unknown[] | null {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || v.length > MAX_ROWS_PER_LIST) return null;
+  return v;
+}
+
 const num = (v: unknown): number => {
   const n = typeof v === 'number' ? v : Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -208,6 +220,15 @@ async function applyParsed(parsed: ParseOutput, force: boolean) {
   }));
 }
 
+// BDO -> numero_if from the saved portfolio (intervento.bdo).
+async function loadBdoToIf(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  for (const i of await listInterventiBase()) {
+    if (i.bdo) map.set(i.bdo, i.numero_if);
+  }
+  return map;
+}
+
 async function applyParsedUntimed(parsed: ParseOutput, force: boolean) {
   const errors: string[] = [];
   let inserted = 0;
@@ -241,22 +262,13 @@ async function applyParsedUntimed(parsed: ParseOutput, force: boolean) {
   // Resolve BDO -> numero_if from the saved portfolio (intervento.bdo). Shared
   // by BEF (resolves the owning IF) and REPORT Bdo (restricts saves to BDO
   // already present in the portfolio).
-  let bdoToIf: Map<string, string> | null = null;
-  if (
-    (parsed.bef && parsed.bef.length) ||
-    (parsed.reportBdo && parsed.reportBdo.length) ||
-    (parsed.reportPdc && parsed.reportPdc.length)
-  ) {
-    bdoToIf = new Map<string, string>();
-    for (const i of await listInterventiBase()) {
-      if (i.bdo) bdoToIf.set(i.bdo, i.numero_if);
-    }
-  }
+  const needsBdoMap = Boolean(parsed.bef?.length || parsed.reportBdo?.length || parsed.reportPdc?.length);
+  const bdoToIf = needsBdoMap ? await loadBdoToIf() : new Map<string, string>();
 
   let befSaved = 0;
   let befIfs: string[] = [];
   if (parsed.bef && parsed.bef.length) {
-    const res = await persistBefFromUpload(parsed.bef, bdoToIf!);
+    const res = await persistBefFromUpload(parsed.bef, bdoToIf);
     befSaved = res.saved;
     befIfs = res.ifs;
     if (res.unresolved) {
@@ -269,7 +281,7 @@ async function applyParsedUntimed(parsed: ParseOutput, force: boolean) {
   let reportBdoSaved = 0;
   let reportBdoIgnored = 0;
   if (parsed.reportBdo && parsed.reportBdo.length) {
-    const res = await persistReportBdoFromUpload(parsed.reportBdo, new Set(bdoToIf!.keys()));
+    const res = await persistReportBdoFromUpload(parsed.reportBdo, new Set(bdoToIf.keys()));
     reportBdoSaved = res.saved;
     reportBdoIgnored = res.ignored;
     if (res.ignored) {
@@ -298,7 +310,7 @@ async function applyParsedUntimed(parsed: ParseOutput, force: boolean) {
   let reportPdcSaved = 0;
   let reportPdcIgnored = 0;
   if (parsed.reportPdc && parsed.reportPdc.length) {
-    const res = await persistReportPdcFromUpload(parsed.reportPdc, new Set(bdoToIf!.keys()));
+    const res = await persistReportPdcFromUpload(parsed.reportPdc, new Set(bdoToIf.keys()));
     reportPdcSaved = res.saved;
     reportPdcIgnored = res.ignored;
     if (res.ignored) {
@@ -353,100 +365,112 @@ export async function POST(req: Request) {
   // --- JSON path: the workbook was parsed in the browser and only the
   // extracted records are sent. Avoids the platform request-body size limit
   // that blocks large (>4.5MB) raw spreadsheet uploads to serverless functions.
-  if (contentType.includes('application/json')) {
-    let body: {
-      kind?: FileKind;
-      interventi?: unknown[];
-      bef?: unknown[];
-      reportBdo?: unknown[];
-      reportRdi?: unknown[];
-      verbaliApertura?: unknown[];
-      verbaliSal?: unknown[];
-      reportPdc?: unknown[];
-      seniority?: ParseOutput['seniority'];
-      mesi?: unknown;
-      anno?: unknown;
-      filename?: string;
-    };
-    try {
-      body = await req.json();
-    } catch {
-      return NextResponse.json({ ok: false, error: 'JSON non valido' }, { status: 400 });
-    }
-    const kind = (body.kind ?? 'unknown') as FileKind;
-    if (kind === 'unknown') {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'Tipo file non riconosciuto. Il nome deve contenere Dashboard / IF_ARIA / BEF / Chiusura / Aggregatore, oppure il file deve contenere il foglio "REPORT Bdo" / "REPORT Rdi" / "REPORT Apertura" / "REPORT Sal" / "REPORT Pdc".',
-        },
-        { status: 422 },
-      );
-    }
-    const interventi = (body.interventi ?? [])
-      .map(normalizeIntervento)
-      .filter((i): i is Intervento => i !== null);
-    // Months arrive as facts. A client that predates them (a tab left open across
-    // a deploy) still sends 12-value profiles on each intervento: read those as
-    // the year of the upload (`anno`, else the portfolio's default year).
-    let mesi = normalizeFacts(body.mesi);
-    if (body.mesi === undefined) {
-      const anno = parseAnno(body.anno) ?? (await resolveAnno());
-      mesi = (body.interventi ?? []).flatMap((raw) => {
-        const r = (raw ?? {}) as Record<string, unknown>;
-        const id = sval(r.numero_if) ?? (typeof r.numero_if === 'number' ? String(r.numero_if) : null);
-        return id ? profileFacts(id, anno, Array.isArray(r.rev_mesi) ? r.rev_mesi.map(num) : [], Array.isArray(r.cons_mesi) ? r.cons_mesi.map(num) : []) : [];
-      });
-    }
-    const bef = (body.bef ?? [])
-      .map(normalizeBef)
-      .filter((b): b is BefRecord => b !== null);
-    const reportBdo = (body.reportBdo ?? [])
-      .map(normalizeReportBdo)
-      .filter((b): b is ReportBdoRecord => b !== null);
-    const reportRdi = (body.reportRdi ?? [])
-      .map(normalizeReportRdi)
-      .filter((b): b is ReportRdiRecord => b !== null);
-    const verbaliApertura = (body.verbaliApertura ?? [])
-      .map(normalizeVerbaleApertura)
-      .filter((b): b is VerbaleAperturaRecord => b !== null);
-    const verbaliSal = (body.verbaliSal ?? [])
-      .map(normalizeVerbaleSal)
-      .filter((b): b is VerbaleSalRecord => b !== null);
-    const reportPdc = (body.reportPdc ?? [])
-      .map(normalizeReportPdc)
-      .filter((b): b is ReportPdcRecord => b !== null);
-    const parsed: ParseOutput = {
-      kind,
-      interventi,
-      bef,
-      reportBdo,
-      reportRdi,
-      verbaliApertura,
-      verbaliSal,
-      reportPdc,
-      seniority: body.seniority,
-      mesi,
-    };
-    const summary = await applyParsed(parsed, force);
-    return NextResponse.json({ ok: true, kind, filename: body.filename ?? null, force, ...summary });
-  }
+  if (contentType.includes('application/json')) return handleJsonUpload(req, force);
+  return handleMultipartUpload(req, force);
+}
 
-  // --- Multipart path: small files parsed server-side (kept for compatibility).
+type JsonUploadBody = {
+  kind?: FileKind;
+  interventi?: unknown;
+  bef?: unknown;
+  reportBdo?: unknown;
+  reportRdi?: unknown;
+  verbaliApertura?: unknown;
+  verbaliSal?: unknown;
+  reportPdc?: unknown;
+  seniority?: ParseOutput['seniority'];
+  mesi?: unknown;
+  anno?: unknown;
+  filename?: string;
+};
+
+const UNKNOWN_KIND_JSON_MSG =
+  'Tipo file non riconosciuto. Il nome deve contenere Dashboard / IF_ARIA / BEF / Chiusura / Aggregatore, oppure il file deve contenere il foglio "REPORT Bdo" / "REPORT Rdi" / "REPORT Apertura" / "REPORT Sal" / "REPORT Pdc".';
+
+const UNKNOWN_KIND_MULTIPART_MSG =
+  'Tipo file non riconosciuto. Il nome deve contenere Dashboard / IF_ARIA / BEF / Chiusura / Aggregatore.';
+
+const fail = (error: string, status: number) =>
+  NextResponse.json({ ok: false, error }, { status });
+
+// Maps each untrusted list through its normalizer and drops rejected rows.
+function normalizeList<T>(raw: unknown[], fn: (r: unknown) => T | null): T[] {
+  return raw.map(fn).filter((x): x is T => x !== null);
+}
+
+// Legacy clients (a tab left open across a deploy) send 12-value profiles on
+// each intervento instead of `mesi` facts: read those as the year of the upload
+// (`anno`, else the portfolio's default year).
+async function legacyMesiFacts(rawInterventi: unknown[], annoRaw: unknown) {
+  const anno = parseAnno(annoRaw) ?? (await resolveAnno());
+  return rawInterventi.flatMap((raw) => {
+    const r = (raw ?? {}) as Record<string, unknown>;
+    const id = sval(r.numero_if) ?? (typeof r.numero_if === 'number' ? String(r.numero_if) : null);
+    if (!id) return [];
+    const rev = Array.isArray(r.rev_mesi) ? r.rev_mesi.map(num) : [];
+    const cons = Array.isArray(r.cons_mesi) ? r.cons_mesi.map(num) : [];
+    return profileFacts(id, anno, rev, cons);
+  });
+}
+
+async function handleJsonUpload(req: Request, force: boolean) {
+  let body: JsonUploadBody;
+  try {
+    body = await req.json();
+  } catch {
+    return fail('JSON non valido', 400);
+  }
+  if (!body || typeof body !== 'object') return fail('JSON non valido', 400);
+
+  const kind = (body.kind ?? 'unknown') as FileKind;
+  if (kind === 'unknown') return fail(UNKNOWN_KIND_JSON_MSG, 422);
+
+  const lists = {
+    interventi: boundedList(body.interventi),
+    bef: boundedList(body.bef),
+    reportBdo: boundedList(body.reportBdo),
+    reportRdi: boundedList(body.reportRdi),
+    verbaliApertura: boundedList(body.verbaliApertura),
+    verbaliSal: boundedList(body.verbaliSal),
+    reportPdc: boundedList(body.reportPdc),
+  };
+  const invalid = Object.entries(lists).find(([, v]) => v === null);
+  if (invalid) {
+    return fail(`Campo "${invalid[0]}" non valido (atteso array di al massimo ${MAX_ROWS_PER_LIST} righe)`, 413);
+  }
+  const rawInterventi = lists.interventi as unknown[];
+
+  const mesi =
+    body.mesi === undefined ? await legacyMesiFacts(rawInterventi, body.anno) : normalizeFacts(body.mesi);
+
+  const parsed: ParseOutput = {
+    kind,
+    interventi: normalizeList(rawInterventi, normalizeIntervento),
+    bef: normalizeList(lists.bef as unknown[], normalizeBef),
+    reportBdo: normalizeList(lists.reportBdo as unknown[], normalizeReportBdo),
+    reportRdi: normalizeList(lists.reportRdi as unknown[], normalizeReportRdi),
+    verbaliApertura: normalizeList(lists.verbaliApertura as unknown[], normalizeVerbaleApertura),
+    verbaliSal: normalizeList(lists.verbaliSal as unknown[], normalizeVerbaleSal),
+    reportPdc: normalizeList(lists.reportPdc as unknown[], normalizeReportPdc),
+    seniority: body.seniority,
+    mesi,
+  };
+  const summary = await applyParsed(parsed, force);
+  return NextResponse.json({ ok: true, kind, filename: body.filename ?? null, force, ...summary });
+}
+
+// Small files parsed server-side (kept for compatibility).
+async function handleMultipartUpload(req: Request, force: boolean) {
   let form: FormData;
   try {
     form = await req.formData();
   } catch {
-    return NextResponse.json(
-      { ok: false, error: 'multipart/form-data o application/json atteso' },
-      { status: 400 },
-    );
+    return fail('multipart/form-data o application/json atteso', 400);
   }
 
   const file = form.get('file');
   if (!file || typeof file === 'string') {
-    return NextResponse.json({ ok: false, error: 'Campo "file" mancante' }, { status: 400 });
+    return fail('Campo "file" mancante', 400);
   }
 
   const filename = (file as File).name;
@@ -456,21 +480,11 @@ export async function POST(req: Request) {
   try {
     parsed = parseFile(filename, buf);
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: 'Parsing fallito: ' + (e instanceof Error ? e.message : '') },
-      { status: 422 },
-    );
+    return fail('Parsing fallito: ' + (e instanceof Error ? e.message : ''), 422);
   }
 
   if (parsed.kind === 'unknown') {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          'Tipo file non riconosciuto. Il nome deve contenere Dashboard / IF_ARIA / BEF / Chiusura / Aggregatore.',
-      },
-      { status: 422 },
-    );
+    return fail(UNKNOWN_KIND_MULTIPART_MSG, 422);
   }
 
   const summary = await applyParsed(parsed, force);

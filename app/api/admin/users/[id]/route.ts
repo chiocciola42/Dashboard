@@ -14,6 +14,13 @@ export const runtime = 'nodejs';
 
 type Params = { params: { id: string } };
 
+// Route ids are positive integers; Number('') === 0 and Number('1.5') pass a
+// bare isFinite check, so validate strictly.
+const parseId = (raw: string): number | null => {
+  const n = Number(raw);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+};
+
 const ROLES: Role[] = ['ADMIN', 'USER', 'USERPLUS'];
 
 // PATCH — approve / reject / change role
@@ -22,8 +29,8 @@ export async function PATCH(req: Request, { params }: Params) {
   if (!isAdmin(me)) {
     return NextResponse.json({ ok: false, error: 'Riservato agli amministratori' }, { status: 403 });
   }
-  const id = Number(params.id);
-  if (!Number.isFinite(id)) {
+  const id = parseId(params.id);
+  if (id === null) {
     return NextResponse.json({ ok: false, error: 'ID non valido' }, { status: 400 });
   }
   if (!(await getUserById(id))) {
@@ -80,8 +87,8 @@ export async function DELETE(_req: Request, { params }: Params) {
   if (!isAdmin(me)) {
     return NextResponse.json({ ok: false, error: 'Riservato agli amministratori' }, { status: 403 });
   }
-  const id = Number(params.id);
-  if (!Number.isFinite(id)) {
+  const id = parseId(params.id);
+  if (id === null) {
     return NextResponse.json({ ok: false, error: 'ID non valido' }, { status: 400 });
   }
   if (id === me!.id) {
