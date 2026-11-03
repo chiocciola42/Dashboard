@@ -1,12 +1,12 @@
 'use client';
-import React, { useRef } from 'react';
+import React from 'react';
 import type { Intervento, Seniority } from '@/lib/types';
-import { EUR, EUR0, PCT, clamp, C } from '@/lib/format';
-import { hbars, hbarsStacked, donut, legchips } from '@/lib/charts';
-import { Html } from '../Html';
-import { ChartCard, CopyTableButton } from '../export/ExportControls';
+import { aggregateByAmbito, aggregateByReferente, totalImporto } from '@/lib/distribuzione';
+import AmbitoTab from './distribuzione/AmbitoTab';
+import ReferenteTab from './distribuzione/ReferenteTab';
+import SeniorityTab from './distribuzione/SeniorityTab';
 
-const PAL = [C.petrol, C.gold, C.slate, C.petrolL, '#B96E15', '#8C9BB3', '#0A4A43', '#C0492F', '#2F8F5B', '#7A5AA0', '#A100FF', '#D98A2B'];
+const SUBTABS = ['4a — Per Ambito', '4b — Per Referente ARIA', '4c — Per Seniority'];
 
 function DistribuzionePanel({
   IFs,
@@ -19,71 +19,9 @@ function DistribuzionePanel({
   distSub: number;
   setDistSub: (n: number) => void;
 }) {
-  const tot = IFs.reduce((s, i) => s + i.importo, 0);
-
-  // 4a — per ambito
-  const aAgg: Record<string, { v: number; n: number }> = {};
-  IFs.forEach((i) => {
-    const k = i.ambito || 'Non classificato';
-    (aAgg[k] = aAgg[k] || { v: 0, n: 0 }).v += i.importo;
-    aAgg[k].n++;
-  });
-  const ae = Object.entries(aAgg).sort((a, b) => b[1].v - a[1].v);
-  const ambCount = ae.length
-    ? hbars(ae.map((e) => ({ label: clamp(e[0], 34), v: e[1].n, disp: e[1].n + '', sub: 'IF', tip: `${e[0]}\n${e[1].n} IF` })), C.petrol)
-    : '<div class="empty">Nessun IF in questa vista</div>';
-  const ambVal = ae.length
-    ? hbars(ae.map((e) => ({ label: clamp(e[0], 34), v: e[1].v, disp: '€ ' + EUR0(e[1].v), tip: `${e[0]}\n${EUR(e[1].v)} · ${e[1].n} IF` })), C.petrolL)
-    : '<div class="empty">Nessun IF</div>';
-
-  // 4b — per referente ARIA
-  const rAgg: Record<string, { Intellera: number; Deloitte: number; Altro: number; n: number; tot: number }> = {};
-  IFs.forEach((i) => {
-    const k = i.ref_aria || '—';
-    const o = (rAgg[k] = rAgg[k] || { Intellera: 0, Deloitte: 0, Altro: 0, n: 0, tot: 0 });
-    if (i.fornitore === 'Intellera') o.Intellera += i.importo;
-    else if (i.fornitore === 'Deloitte') o.Deloitte += i.importo;
-    else o.Altro += i.importo;
-    o.tot += i.importo;
-    o.n++;
-  });
-  const re = Object.entries(rAgg).sort((a, b) => b[1].tot - a[1].tot);
-  const refStack = re.length
-    ? hbarsStacked(
-        re.map(([k, o]) => ({
-          label: clamp(k, 24),
-          total: o.tot,
-          disp: '€ ' + EUR0(o.tot),
-          sub: o.n + ' IF',
-          segs: [
-            { v: o.Intellera, c: C.petrol },
-            { v: o.Deloitte, c: C.gold },
-            { v: o.Altro, c: C.slateL },
-          ],
-          tip: `${k}\nIntellera: ${EUR(o.Intellera)}\nDeloitte: ${EUR(o.Deloitte)}\nTotale: ${EUR(o.tot)} · ${o.n} IF`,
-        })),
-      )
-    : '<div class="empty">Nessun IF</div>';
-
-  // 4c — seniority
-  const totg = seniority.reduce((s, x) => s + x.gg, 0);
-  const tar = (t: number | null) => (t ? t.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €' : '—');
-  const senDonut = seniority.length
-    ? donut(
-        seniority.map((s, i) => ({
-          label: `${s.code} · ${EUR0(s.gg)} gg`,
-          v: s.gg,
-          c: PAL[i % PAL.length],
-          tip: `${s.figura} (${s.code})\n${EUR0(s.gg)} GG/uomo${s.tariffa ? ' · ' + tar(s.tariffa) + '/gg' : ''}`,
-        })),
-        EUR0(totg),
-        'GG totali',
-      )
-    : '<div class="empty">Nessun dato</div>';
-
-  const ambTblRef = useRef<HTMLDivElement>(null);
-  const refTblRef = useRef<HTMLDivElement>(null);
-  const senTblRef = useRef<HTMLDivElement>(null);
+  const tot = totalImporto(IFs);
+  const ae = aggregateByAmbito(IFs);
+  const re = aggregateByReferente(IFs);
 
   return (
     <div className="panel on" data-p="3">
@@ -92,174 +30,16 @@ function DistribuzionePanel({
         <p>Analisi per ambito, referente e seniority.</p>
       </div>
       <div className="subtabs">
-        {['4a — Per Ambito', '4b — Per Referente ARIA', '4c — Per Seniority'].map((t, i) => (
+        {SUBTABS.map((t, i) => (
           <button key={i} className={distSub === i ? 'on' : ''} onClick={() => setDistSub(i)}>
             {t}
           </button>
         ))}
       </div>
 
-      <div className={'subpanel' + (distSub === 0 ? ' on' : '')}>
-        <div className="grid2">
-          <ChartCard
-            title="N° IF per ambito"
-            caption="Numero di Interventi di Fornitura per macro ambito"
-            filename="IF_per_ambito"
-          >
-            <Html html={ambCount} />
-          </ChartCard>
-          <ChartCard
-            title="Valore (€) per ambito"
-            caption="Valore ordinato per macro ambito"
-            filename="Valore_per_ambito"
-          >
-            <Html html={ambVal} />
-          </ChartCard>
-        </div>
-        <div className="tablecard">
-          <div className="tbar">
-            <h3>Dettaglio per ambito</h3>
-            <CopyTableButton style={{ marginLeft: 'auto' }} targetRef={ambTblRef} />
-          </div>
-          <div className="tscroll" ref={ambTblRef}>
-            <table className="dtable">
-              <thead>
-                <tr>
-                  <th>Ambito</th>
-                  <th className="num">N° IF</th>
-                  <th className="num">Valore (€)</th>
-                  <th className="num">% sul totale</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ae.length ? (
-                  ae.map((e) => (
-                    <tr key={e[0]}>
-                      <td>{e[0]}</td>
-                      <td className="num">{e[1].n}</td>
-                      <td className="num">{EUR0(e[1].v)} €</td>
-                      <td className="num">{tot ? PCT((e[1].v / tot) * 100) : '—'}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={4} style={{ color: 'var(--muted)' }}>
-                      Nessun dato
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div className={'subpanel' + (distSub === 1 ? ' on' : '')}>
-        <ChartCard
-          title={
-            <>
-              Valore per referente ARIA{' '}
-              <span style={{ color: 'var(--muted)', fontWeight: 500 }}>(split Intellera / Deloitte)</span>
-            </>
-          }
-          exportTitle="Valore per referente ARIA (split Intellera / Deloitte)"
-          filename="Valore_per_referente_ARIA"
-        >
-          <Html
-            className="legrow"
-            style={{ marginTop: 0, marginBottom: 14 }}
-            html={legchips([
-              { c: C.petrol, t: 'Intellera' },
-              { c: C.gold, t: 'Deloitte' },
-            ])}
-          />
-          <Html html={refStack} />
-        </ChartCard>
-        <div className="tablecard">
-          <div className="tbar">
-            <h3>Dettaglio referenti</h3>
-            <CopyTableButton style={{ marginLeft: 'auto' }} targetRef={refTblRef} />
-          </div>
-          <div className="tscroll" ref={refTblRef}>
-            <table className="dtable">
-              <thead>
-                <tr>
-                  <th>Referente ARIA</th>
-                  <th className="num">Intellera (€)</th>
-                  <th className="num">Deloitte (€)</th>
-                  <th className="num">Totale (€)</th>
-                  <th className="num">N° IF</th>
-                </tr>
-              </thead>
-              <tbody>
-                {re.length ? (
-                  re.map(([k, o]) => (
-                    <tr key={k}>
-                      <td>{k}</td>
-                      <td className="num">{o.Intellera ? EUR0(o.Intellera) + ' €' : '—'}</td>
-                      <td className="num">{o.Deloitte ? EUR0(o.Deloitte) + ' €' : '—'}</td>
-                      <td className="num">
-                        <b>{EUR0(o.tot)} €</b>
-                      </td>
-                      <td className="num">{o.n}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={5} style={{ color: 'var(--muted)' }}>
-                      Nessun dato
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div className={'subpanel' + (distSub === 2 ? ' on' : '')}>
-        <div className="grid2">
-          <ChartCard
-            title="GG/Uomo per figura professionale"
-            caption="Giornate/uomo pianificate · intero portafoglio"
-            filename="GG_uomo_per_figura"
-          >
-            <Html html={senDonut} />
-          </ChartCard>
-          <div className="tablecard">
-            <div className="tbar">
-              <h3>Figure professionali e tariffe</h3>
-              <CopyTableButton style={{ marginLeft: 'auto' }} targetRef={senTblRef} />
-            </div>
-            <div className="tscroll" ref={senTblRef}>
-              <table className="dtable">
-                <thead>
-                  <tr>
-                    <th>Figura</th>
-                    <th>Codice</th>
-                    <th className="num">GG/Uomo</th>
-                    <th className="num">Tariffa (€/GG)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {seniority.map((s, i) => (
-                    <tr key={i}>
-                      <td>{s.figura}</td>
-                      <td>
-                        <span className="pill" style={{ background: '#EEF2F1', color: 'var(--ink)' }}>
-                          {s.code}
-                        </span>
-                      </td>
-                      <td className="num">{EUR0(s.gg)}</td>
-                      <td className="num">{tar(s.tariffa)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
+      <AmbitoTab ae={ae} tot={tot} active={distSub === 0} />
+      <ReferenteTab re={re} active={distSub === 1} />
+      <SeniorityTab seniority={seniority} active={distSub === 2} />
     </div>
   );
 }
