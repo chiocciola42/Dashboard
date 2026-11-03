@@ -3,8 +3,10 @@
 import type { DocStatus, Intervento, ReportPdcRecord, VerbaleSalRecord, BefRow } from './types';
 import { dfmt, ICO } from './format';
 import type { Matrix } from './exportTable';
+import { compareBy, eurPlain, matchesFields, toCsv, type SortKey } from './ifTable';
 
-export type SortKey = keyof Intervento;
+export { eurPlain, type SortKey };
+
 export type MonthlyData = { pdc: ReportPdcRecord[]; sal: VerbaleSalRecord[]; bef: BefRow[] };
 export type MonthlyState = MonthlyData | 'loading' | 'error';
 
@@ -55,9 +57,6 @@ export function sortByPeriod<T>(rows: T[], period: (r: T) => string | null): T[]
   return [...rows].sort((a, b) => periodKey(period(a)) - periodKey(period(b)));
 }
 
-// Per Excel i decimali vanno separati dalla virgola (locale it-IT) e senza
-// separatore di migliaia, altrimenti la cella resta testo.
-export const eurPlain = (n: number) => Number(n || 0).toFixed(2).replace('.', ',');
 export const docLabel = (v: DocStatus) => ICO[v][1];
 
 export const pdcMatrix = (pdc: ReportPdcRecord[]): Matrix | null =>
@@ -100,44 +99,17 @@ export function exportMatrix(IFs: Intervento[]): Matrix {
   return [EXPORT_HEAD, ...IFs.map(exportRow)];
 }
 
-// Semicolon-separated, every cell quoted, CRLF line ends, UTF-8 BOM so Excel
-// opens it with the right encoding.
-export function buildCsv(IFs: Intervento[]): string {
-  const body = [EXPORT_HEAD, ...IFs.map(exportRow)]
-    .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';'))
-    .join('\r\n');
-  return '﻿' + body;
-}
+// CSV text of the shown IFs (see toCsv for the format).
+export const buildCsv = (IFs: Intervento[]): string => toCsv([EXPORT_HEAD, ...IFs.map(exportRow)]);
+
+const SEARCH_FIELDS: (keyof Intervento)[] = ['numero_if', 'bdo', 'titolo', 'ambito', 'ref_aria', 'ref_fornitore', 'fornitore', 'modalita_if', 'azione'];
 
 // Free-text search over the main text fields; empty query keeps everything.
-export function matchesQuery(x: Intervento, rawQuery: string): boolean {
-  const query = rawQuery.toLowerCase().trim();
-  if (!query) return true;
-  return [x.numero_if, x.bdo, x.titolo, x.ambito, x.ref_aria, x.ref_fornitore, x.fornitore, x.modalita_if, x.azione]
-    .join(' ')
-    .toLowerCase()
-    .includes(query);
-}
-
-function compareBy(sortK: SortKey, sortDir: number) {
-  const numeric = sortK === 'importo';
-  return (a: Intervento, b: Intervento): number => {
-    let va: string | number = a[sortK] as never;
-    let vb: string | number = b[sortK] as never;
-    if (numeric) {
-      va = Number(va) || 0;
-      vb = Number(vb) || 0;
-    } else {
-      va = (va == null ? '' : String(va)).toLowerCase();
-      vb = (vb == null ? '' : String(vb)).toLowerCase();
-    }
-    return va < vb ? -sortDir : va > vb ? sortDir : 0;
-  };
-}
+export const matchesQuery = (x: Intervento, rawQuery: string): boolean => matchesFields(x, rawQuery, SEARCH_FIELDS);
 
 // Filtered, sorted copy of the portfolio (the input is not mutated).
 export function filterAndSort(IFs: Intervento[], query: string, sortK: SortKey, sortDir: number): Intervento[] {
-  return IFs.filter((x) => matchesQuery(x, query)).sort(compareBy(sortK, sortDir));
+  return IFs.filter((x) => matchesQuery(x, query)).sort(compareBy(sortK, sortDir, ['importo']));
 }
 
 // Clicking a header: same column flips direction; a new column starts

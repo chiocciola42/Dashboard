@@ -1,66 +1,23 @@
 'use client';
 import React, { useDeferredValue, useMemo, useState } from 'react';
-import type { Intervento, InterventoInput, DocStatus } from '@/lib/types';
-import { EUR0, dfmt } from '@/lib/format';
-import InlineField from '../editing/InlineField';
-import StatusSelect from '../editing/StatusSelect';
+import type { Intervento, InterventoInput } from '@/lib/types';
+import { EUR0 } from '@/lib/format';
+import {
+  REGISTRO_PAGE,
+  buildRegistroCsv,
+  exportMatrix,
+  filterAndSortRegistro,
+  nextRegistroSort,
+  registroViewKey,
+  visibleCount,
+  type SortKey,
+} from '@/lib/registroIF';
 import { CopyTableButton } from '../export/ExportControls';
-import type { Matrix } from '@/lib/exportTable';
+import RegistroTable from './registro/RegistroTable';
+import { downloadCsvFile } from './shared/tableActions';
 
-// Righe renderizzate per volta: con migliaia di IF il DOM completo rallenta
-// ordinamento e digitazione. Export e totali usano sempre tutte le righe.
-export const REGISTRO_PAGE = 200;
-
-const ST_TXT: Record<DocStatus, string> = { ok: 'OK', ko: 'Mancante', prog: 'In corso', nd: 'N/D' };
-
-// Intestazioni e righe condivise fra l'export CSV e la copia per Excel: una
-// sola definizione delle colonne, così i due export non divergono.
-const exportHead = (anno: number) => [
-  'Numero IF', 'BDO', 'Titolo', 'Ambito', 'Fornitore', 'Referente ARIA', 'Referente Intellera',
-  'Modalità', 'Attivazione immediata', 'Stato', 'Data assegnazione', 'Data inizio', 'Data fine',
-  'PDC', 'V. Apertura', 'V. SAL', 'BEF', 'Importo', `Revenue ${anno}`, 'Subappalto',
-];
-
-function exportRow(x: Intervento, eur: (n: number) => string): (string | number)[] {
-  return [
-    x.numero_if, x.bdo || '', x.titolo, x.ambito || '', x.fornitore, x.ref_aria || '', x.ref_fornitore || '',
-    x.modalita_if || '', x.attivazione || '', x.stato, x.data_assegnazione || '', x.data_inizio || '', x.data_fine || '',
-    ST_TXT[x.pdc], ST_TXT[x.v_apertura], ST_TXT[x.v_sal], ST_TXT[x.bef], eur(x.importo), eur(x.revenue_anno),
-    x.subappalto ? 'Sì' : 'No',
-  ];
-}
-
-// Per Excel i decimali vanno separati dalla virgola (locale it-IT) e senza
-// separatore di migliaia, altrimenti la cella resta testo.
-const eurPlain = (n: number) => Number(n || 0).toFixed(2).replace('.', ',');
-
-// Exported for tests: the matrix behind "Copia per Excel" (header + one row per IF).
-export function exportMatrix(IFs: Intervento[], anno: number): Matrix {
-  return [exportHead(anno), ...IFs.map((x) => exportRow(x, eurPlain))];
-}
-
-function exportCSV(IFs: Intervento[], anno: number) {
-  const head = exportHead(anno);
-  // IFs arrives already filtered/sorted exactly as shown on screen — export it
-  // as-is instead of re-sorting, so the CSV matches what the user is looking at.
-  const rows = IFs.map((x) => exportRow(x, eurPlain));
-  const csv = [head, ...rows]
-    .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';'))
-    .join('\r\n');
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'Registro_IF.csv';
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(url);
-    a.remove();
-  }, 800);
-}
-
-type SortKey = keyof Intervento;
+// Re-exported for tests: the Excel matrix and the page size.
+export { exportMatrix, REGISTRO_PAGE };
 
 function RegistroPanel({
   IFs,
@@ -88,63 +45,18 @@ function RegistroPanel({
   // The input echoes keystrokes instantly; re-filtering/sorting the table runs
   // at deferred priority so typing never stutters on long registries.
   const deferredQ = useDeferredValue(q);
-  const [sortK, setSortK] = useState<SortKey>('importo');
-  const [sortDir, setSortDir] = useState(-1);
+  const [sort, setSort] = useState<{ key: SortKey; dir: number }>({ key: 'importo', dir: -1 });
 
-  const rows = useMemo(() => {
-    const query = deferredQ.toLowerCase().trim();
-    const num = sortK === 'importo' || sortK === 'revenue_anno';
-    return IFs.filter(
-      (x) =>
-        !query ||
-        [x.numero_if, x.titolo, x.ref_aria, x.ref_fornitore, x.ambito, x.bdo, x.stato, x.modalita_if]
-          .join(' ')
-          .toLowerCase()
-          .includes(query),
-    ).sort((a, b) => {
-      let va: string | number = a[sortK] as never;
-      let vb: string | number = b[sortK] as never;
-      if (num) {
-        va = Number(va) || 0;
-        vb = Number(vb) || 0;
-      } else {
-        va = (va == null ? '' : String(va)).toLowerCase();
-        vb = (vb == null ? '' : String(vb)).toLowerCase();
-      }
-      return va < vb ? -sortDir : va > vb ? sortDir : 0;
-    });
-  }, [IFs, deferredQ, sortK, sortDir]);
+  const rows = useMemo(() => filterAndSortRegistro(IFs, deferredQ, sort.key, sort.dir), [IFs, deferredQ, sort]);
 
   // Il limite si azzera da solo quando cambiano ricerca, ordinamento o dati.
-  const viewKey = `${deferredQ}|${sortK}|${sortDir}|${IFs.length}`;
+  const viewKey = registroViewKey(deferredQ, sort.key, sort.dir, IFs.length);
   const [shown, setShown] = useState({ key: viewKey, n: REGISTRO_PAGE });
-  const visibleN = shown.key === viewKey ? shown.n : REGISTRO_PAGE;
+  const visibleN = visibleCount(shown, viewKey);
   const visibleRows = rows.length > visibleN ? rows.slice(0, visibleN) : rows;
 
-  const sort = (k: SortKey) => {
-    if (sortK === k) setSortDir((d) => d * -1);
-    else {
-      setSortK(k);
-      setSortDir(k === 'importo' || k === 'revenue_anno' ? -1 : 1);
-    }
-  };
-
+  const onSort = (k: SortKey) => setSort((cur) => nextRegistroSort(cur, k));
   const sumShown = rows.reduce((s, x) => s + x.importo, 0);
-  const cols: [SortKey, string][] = [
-    ['numero_if', 'IF'],
-    ['bdo', 'N° BO'],
-    ['titolo', 'Intervento / Referente'],
-    ['modalita_if', 'Modalità'],
-    ['attivazione', 'Att.imm.'],
-    ['stato', 'Stato BO'],
-    ['pdc', 'PDC'],
-    ['v_apertura', 'V.Ap.'],
-    ['v_sal', 'V.SAL'],
-    ['bef', 'BEF'],
-    ['data_inizio', 'Inizio'],
-    ['data_fine', 'Fine'],
-    ['importo', 'Importo €'],
-  ];
 
   return (
     <div className="panel on" data-p="6">
@@ -165,154 +77,26 @@ function RegistroPanel({
             getMatrix={() => exportMatrix(rows, anno)}
             title="Copia tutte le righe mostrate (tutte le colonne): incollale in un foglio Excel"
           />
-          <button className="freset" onClick={() => exportCSV(rows, anno)} style={{ borderColor: 'var(--petrol)', color: 'var(--petrol-d)' }}>
+          <button className="freset" onClick={() => downloadCsvFile('Registro_IF.csv', buildRegistroCsv(rows, anno))} style={{ borderColor: 'var(--petrol)', color: 'var(--petrol-d)' }}>
             ⤓ Esporta CSV
           </button>
           <div className="tot">
             Mostrati: <b>{rows.length}</b> · Valore: <b>€ {EUR0(sumShown)}</b>
           </div>
         </div>
-        <div className="tscroll noxscroll">
-          <table id="tbl">
-            <thead>
-              <tr>
-                {cols.map(([k, label]) => (
-                  <th
-                    key={k}
-                    className={k === 'titolo' ? 'thtt' : undefined}
-                    onClick={() => sort(k)}
-                    style={{ cursor: 'pointer' }}
-                    aria-sort={sortK === k ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
-                  >
-                    {label}
-                    {sortK === k && <span aria-hidden="true"> {sortDir === 1 ? '▲' : '▼'}</span>}
-                  </th>
-                ))}
-                {canEdit && <th>Azioni</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {visibleRows.map((x) => {
-                const saving = savingIds.has(x.numero_if);
-                const hl = highlightIds.has(x.numero_if);
-                return (
-                  <tr key={x.numero_if} className={hl ? 'row-saved' : ''} style={saving ? { opacity: 0.55 } : undefined}>
-                    <td className="codecell">{x.numero_if}</td>
-                    <td className="codecell" style={{ color: 'var(--muted)' }}>
-                      {x.bdo || '—'}
-                    </td>
-                    <td className="tt">
-                      {/* <details> nativo: il titolo è troncato a 2 righe da CSS
-                          e il clic sulla cella (o Invio/Spazio da tastiera)
-                          espande il testo completo senza JS dedicato */}
-                      <details className="ttd">
-                        <summary title="Clic per espandere/comprimere il testo">
-                          <b>{x.titolo}</b>
-                          <span className="ref">
-                            {x.subappalto ? <span className="pill sub">sub</span> : null} ARIA: {x.ref_aria || '—'} · Int.:{' '}
-                            {x.ref_fornitore || '—'}
-                          </span>
-                        </summary>
-                      </details>
-                    </td>
-                    <td>
-                      {canEdit ? (
-                        <InlineField value={x.modalita_if} onSave={(v) => onSaveField(x.numero_if, { modalita_if: v })} />
-                      ) : (
-                        x.modalita_if || '—'
-                      )}
-                    </td>
-                    <td>
-                      {canEdit ? (
-                        <select
-                          className="stsel"
-                          value={x.attivazione || 'NO'}
-                          disabled={saving}
-                          onChange={(e) => onSaveField(x.numero_if, { attivazione: e.target.value })}
-                        >
-                          <option value="SI">SI</option>
-                          <option value="NO">NO</option>
-                        </select>
-                      ) : (
-                        x.attivazione || 'NO'
-                      )}
-                    </td>
-                    <td>
-                      {canEdit ? (
-                        <select
-                          className="stsel"
-                          value={x.stato}
-                          disabled={saving}
-                          onChange={(e) =>
-                            onSaveField(x.numero_if, { stato: e.target.value, has_bo: e.target.value === 'approvato' })
-                          }
-                        >
-                          <option value="approvato">approvato</option>
-                          <option value="non elaborato">non elab.</option>
-                        </select>
-                      ) : (
-                        x.stato
-                      )}
-                    </td>
-                    {(['pdc', 'v_apertura', 'v_sal', 'bef'] as const).map((k) => (
-                      <td key={k} style={{ textAlign: 'center' }}>
-                        {canEdit ? (
-                          <StatusSelect value={x[k]} disabled={saving} onChange={(v) => onSaveField(x.numero_if, { [k]: v })} />
-                        ) : (
-                          ST_TXT[x[k]]
-                        )}
-                      </td>
-                    ))}
-                    <td className="codecell" style={{ color: 'var(--muted)' }}>
-                      {canEdit ? (
-                        <InlineField type="date" value={x.data_inizio} display={dfmt(x.data_inizio)} onSave={(v) => onSaveField(x.numero_if, { data_inizio: v || null })} />
-                      ) : (
-                        dfmt(x.data_inizio)
-                      )}
-                    </td>
-                    <td className="codecell" style={{ color: 'var(--muted)' }}>
-                      {canEdit ? (
-                        <InlineField type="date" value={x.data_fine} display={dfmt(x.data_fine)} onSave={(v) => onSaveField(x.numero_if, { data_fine: v || null })} />
-                      ) : (
-                        dfmt(x.data_fine)
-                      )}
-                    </td>
-                    <td className="num">
-                      {canEdit ? (
-                        <InlineField type="number" value={x.importo} display={EUR0(x.importo)} onSave={(v) => onSaveField(x.numero_if, { importo: Number(v) || 0 })} />
-                      ) : (
-                        EUR0(x.importo)
-                      )}
-                    </td>
-                    {canEdit && (
-                      <td className="actcell">
-                        <button className="iconbtn" title="Modifica completa" onClick={() => onOpenEdit(x)}>
-                          ✏️
-                        </button>
-                        <button
-                          className="iconbtn"
-                          title="Elimina"
-                          onClick={() => {
-                            if (window.confirm(`Eliminare l'IF ${x.numero_if}? (soft-delete)`)) onDelete(x.numero_if);
-                          }}
-                        >
-                          🗑️
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={canEdit ? 14 : 13} style={{ color: 'var(--muted)', padding: 18 }}>
-                    Nessun IF in questa vista.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <RegistroTable
+          rows={rows}
+          visibleRows={visibleRows}
+          canEdit={canEdit}
+          sortK={sort.key}
+          sortDir={sort.dir}
+          onSort={onSort}
+          savingIds={savingIds}
+          highlightIds={highlightIds}
+          onSaveField={onSaveField}
+          onOpenEdit={onOpenEdit}
+          onDelete={onDelete}
+        />
         {rows.length > visibleRows.length && (
           <div className="foot" style={{ marginTop: 8, textAlign: 'center' }}>
             Visualizzate {visibleRows.length} righe su {rows.length} ·{' '}
