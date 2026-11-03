@@ -1,5 +1,6 @@
 'use client';
 import React, { useDeferredValue, useMemo, useState } from 'react';
+import { fetchWithTimeout } from '@/lib/fetchWithTimeout';
 import type { DocStatus, Intervento, InterventoInput, ReportPdcRecord, VerbaleSalRecord, BefRow } from '@/lib/types';
 import { EUR0, dfmt, ICO } from '@/lib/format';
 import InlineField from '../editing/InlineField';
@@ -260,7 +261,7 @@ function DettaglioIFPanel({
     });
     if (!monthly[numero_if]) {
       setMonthly((m) => ({ ...m, [numero_if]: 'loading' }));
-      fetch(`/api/interventi/${encodeURIComponent(numero_if)}/monthly`)
+      fetchWithTimeout(`/api/interventi/${encodeURIComponent(numero_if)}/monthly`)
         .then((res) => (res.ok ? res.json() : Promise.reject()))
         .then((data) => setMonthly((m) => ({ ...m, [numero_if]: { pdc: data.pdc, sal: data.sal, bef: data.bef } })))
         .catch(() => setMonthly((m) => ({ ...m, [numero_if]: 'error' })));

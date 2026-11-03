@@ -1,5 +1,6 @@
 'use client';
 import React, { useState } from 'react';
+import { fetchWithTimeout } from '@/lib/fetchWithTimeout';
 import Link from 'next/link';
 
 export default function RegisterPage() {
@@ -16,7 +17,7 @@ export default function RegisterPage() {
     setBusy(true);
     setError('');
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await fetchWithTimeout('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, password, role }),

@@ -1,5 +1,6 @@
 'use client';
 import React, { useRef, useState } from 'react';
+import { fetchWithTimeout, UPLOAD_FETCH_TIMEOUT_MS } from '@/lib/fetchWithTimeout';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -106,7 +107,7 @@ export default function UploadPage() {
       setProgress(55);
       const qs = new URLSearchParams();
       if (force) qs.set('force', 'true');
-      const res = await fetch('/api/upload?' + qs.toString(), {
+      const res = await fetchWithTimeout('/api/upload?' + qs.toString(), {
         method: 'POST',
         headers: token
           ? { 'Content-Type': 'application/json', 'x-upload-secret': token }
@@ -124,7 +125,7 @@ export default function UploadPage() {
           seniority: parsed.seniority,
           filename: file.name,
         }),
-      });
+      }, UPLOAD_FETCH_TIMEOUT_MS);
       setProgress(85);
       const data: Result = await res.json();
       setResult(data);

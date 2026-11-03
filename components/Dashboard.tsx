@@ -1,5 +1,6 @@
 'use client';
 import React, { useEffect, useMemo, useRef, useState, useCallback, useTransition } from 'react';
+import { fetchWithTimeout } from '@/lib/fetchWithTimeout';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { DashboardData, Intervento, InterventoInput, RtiConfig, SafeUser } from '@/lib/types';
@@ -171,7 +172,7 @@ export default function Dashboard({
       setInterventi((list) => list.map((i) => (i.numero_if === numero_if ? ({ ...i, ...patch } as Intervento) : i)));
       setSaving(numero_if, true);
       try {
-        const res = await fetch(`/api/interventi/${encodeURIComponent(numero_if)}`, {
+        const res = await fetchWithTimeout(`/api/interventi/${encodeURIComponent(numero_if)}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...patch, anno }),
@@ -198,7 +199,7 @@ export default function Dashboard({
     async (input: InterventoInput, isNew: boolean): Promise<boolean> => {
       try {
         if (isNew) {
-          const res = await fetch('/api/interventi', {
+          const res = await fetchWithTimeout('/api/interventi', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ...input, anno }),
@@ -215,7 +216,7 @@ export default function Dashboard({
           showToast('Intervento creato');
         } else {
           const id = input.numero_if as string;
-          const res = await fetch(`/api/interventi/${encodeURIComponent(id)}`, {
+          const res = await fetchWithTimeout(`/api/interventi/${encodeURIComponent(id)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ...input, anno }),
@@ -243,7 +244,7 @@ export default function Dashboard({
       const prev = interventi;
       setInterventi((list) => list.filter((i) => i.numero_if !== numero_if));
       try {
-        const res = await fetch(`/api/interventi/${encodeURIComponent(numero_if)}`, { method: 'DELETE' });
+        const res = await fetchWithTimeout(`/api/interventi/${encodeURIComponent(numero_if)}`, { method: 'DELETE' });
         if (!res.ok) {
           setInterventi(prev);
           if (!handledAuthError(res.status)) showToast('Eliminazione non riuscita', true);
@@ -261,7 +262,7 @@ export default function Dashboard({
   const onUpdateRti = useCallback(
     async (u: { massimale_totale: number; quota_intellera_pct: number; quota_deloitte_pct: number }) => {
       try {
-        const res = await fetch('/api/config/rti', {
+        const res = await fetchWithTimeout('/api/config/rti', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(u),

@@ -1,5 +1,6 @@
 'use client';
 import React, { useRef, useState } from 'react';
+import { fetchWithTimeout } from '@/lib/fetchWithTimeout';
 import Link from 'next/link';
 import type { Role, SafeUser } from '@/lib/types';
 import { ROLE_LABEL, STATUS_LABEL } from '@/lib/auth/permissions';
@@ -27,7 +28,7 @@ export default function UsersAdmin({
     setBusyId(id);
     setError('');
     try {
-      const res = await fetch(`/api/admin/users/${id}`, init);
+      const res = await fetchWithTimeout(`/api/admin/users/${id}`, init);
       const data = await res.json();
       if (!res.ok || !data.ok) {
         setError(data.error || 'Operazione non riuscita');

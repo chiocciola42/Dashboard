@@ -1,5 +1,6 @@
 'use client';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { fetchWithTimeout } from '@/lib/fetchWithTimeout';
 import Link from 'next/link';
 import type {
   Intervento,
@@ -286,7 +287,7 @@ function GaraSection({
   const saveGara = async () => {
     setBusy(true);
     try {
-      const res = await fetch('/api/admin/gara', {
+      const res = await fetchWithTimeout('/api/admin/gara', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -306,7 +307,7 @@ function GaraSection({
   const saveTariffe = async () => {
     setBusy(true);
     try {
-      const res = await fetch('/api/admin/tariffe', {
+      const res = await fetchWithTimeout('/api/admin/tariffe', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ seniority: sen }),
@@ -526,7 +527,7 @@ function GlobalRevSection({
   const save = async () => {
     setBusy(true);
     try {
-      const res = await fetch('/api/admin/timeline/anno', {
+      const res = await fetchWithTimeout('/api/admin/timeline/anno', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ anno, revenue: cur.rev, consuntivato: cur.cons }),
@@ -614,7 +615,7 @@ function IfBoSection({
   const changeYear = async (y: number) => {
     setLoadingYear(true);
     try {
-      const res = await fetch(`/api/interventi?anno=${y}`);
+      const res = await fetchWithTimeout(`/api/interventi?anno=${y}`);
       if (!res.ok) throw new Error();
       const data = await res.json();
       setIfs(data.interventi as Intervento[]);
@@ -742,7 +743,7 @@ function IfDetail({
   const saveCore = async () => {
     setBusy(true);
     try {
-      const res = await fetch(`/api/interventi/${encodeURIComponent(iv.numero_if)}`, {
+      const res = await fetchWithTimeout(`/api/interventi/${encodeURIComponent(iv.numero_if)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...core, rev_mesi: rev, cons_mesi: cons, anno }),
@@ -839,7 +840,7 @@ function RisorseEditor({ numeroIf, show }: { numeroIf: string; show: (m: string,
     let active = true;
     setLoaded(false);
     setLoadError(false);
-    fetch(`/api/admin/risorse/${encodeURIComponent(numeroIf)}`)
+    fetchWithTimeout(`/api/admin/risorse/${encodeURIComponent(numeroIf)}`)
       .then((r) => {
         if (!r.ok) throw new Error();
         return r.json();
@@ -867,7 +868,7 @@ function RisorseEditor({ numeroIf, show }: { numeroIf: string; show: (m: string,
   const save = async () => {
     setBusy(true);
     try {
-      const res = await fetch(`/api/admin/risorse/${encodeURIComponent(numeroIf)}`, {
+      const res = await fetchWithTimeout(`/api/admin/risorse/${encodeURIComponent(numeroIf)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ risorse: rows }),
@@ -964,7 +965,7 @@ function BefEditor({ numeroIf, show }: { numeroIf: string; show: (m: string, bad
     let active = true;
     setLoaded(false);
     setLoadError(false);
-    fetch(`/api/admin/bef/${encodeURIComponent(numeroIf)}`)
+    fetchWithTimeout(`/api/admin/bef/${encodeURIComponent(numeroIf)}`)
       .then((r) => {
         if (!r.ok) throw new Error();
         return r.json();
@@ -992,7 +993,7 @@ function BefEditor({ numeroIf, show }: { numeroIf: string; show: (m: string, bad
   const save = async () => {
     setBusy(true);
     try {
-      const res = await fetch(`/api/admin/bef/${encodeURIComponent(numeroIf)}`, {
+      const res = await fetchWithTimeout(`/api/admin/bef/${encodeURIComponent(numeroIf)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bef: rows }),
@@ -1107,7 +1108,7 @@ function DbSection({ show }: { show: (m: string, bad?: boolean) => void }) {
   const loadTables = useCallback(() => {
     setLoaded(false);
     setLoadError(false);
-    fetch('/api/admin/db/tables')
+    fetchWithTimeout('/api/admin/db/tables')
       .then((r) => r.json())
       .then((d) => {
         if (!d.ok) throw new Error(d.error);
@@ -1196,7 +1197,7 @@ function TableViewer({ name }: { name: string }) {
   useEffect(() => {
     setLoaded(false);
     setErr(false);
-    fetch(`/api/admin/db/table/${encodeURIComponent(name)}?limit=${limit}&offset=${offset}`)
+    fetchWithTimeout(`/api/admin/db/table/${encodeURIComponent(name)}?limit=${limit}&offset=${offset}`)
       .then((r) => r.json())
       .then((d) => {
         if (!d.ok) throw new Error(d.error);
@@ -1321,7 +1322,7 @@ function QueryRunner({
     setError(null);
     setResult(null);
     try {
-      const res = await fetch('/api/admin/db/query', {
+      const res = await fetchWithTimeout('/api/admin/db/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query }),
@@ -1434,7 +1435,7 @@ function ExportSection({ show }: { show: (m: string, bad?: boolean) => void }) {
   const exportDbXlsx = async () => {
     setBusyXlsx(true);
     try {
-      const res = await fetch('/api/admin/db/export');
+      const res = await fetchWithTimeout('/api/admin/db/export');
       if (!res.ok) {
         // The endpoint returns JSON on error (403/503/500) and a binary
         // workbook on success — surface the server message when present.

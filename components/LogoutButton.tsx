@@ -1,5 +1,6 @@
 'use client';
 import React, { useState } from 'react';
+import { fetchWithTimeout } from '@/lib/fetchWithTimeout';
 import { useRouter } from 'next/navigation';
 
 export default function LogoutButton({
@@ -15,7 +16,7 @@ export default function LogoutButton({
   const logout = async () => {
     setBusy(true);
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await fetchWithTimeout('/api/auth/logout', { method: 'POST' });
     } catch {
       /* ignore */
     }
