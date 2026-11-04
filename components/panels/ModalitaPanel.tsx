@@ -1,30 +1,11 @@
 'use client';
-import React, { useRef } from 'react';
+import React from 'react';
 import type { Intervento } from '@/lib/types';
-import { EUR, EUR0, PCT, C } from '@/lib/format';
-import { donut, chartVBars } from '@/lib/charts';
+import { aggregateModalita } from '@/lib/modalita';
 import { Html } from '../Html';
-import { ChartCard, CopyTableButton } from '../export/ExportControls';
-
-// Canonical modalità buckets. Matching is EXACT (not substring) so a compound
-// value like "A canone + A corpo" is never double-counted into two buckets —
-// it lands in ALTRO_KEY instead, same as null/unrecognized values.
-const ALTRO_KEY = 'A_altro';
-const MODLAB: Record<string, string> = {
-  A_corpo: 'A corpo',
-  A_canone: 'A canone',
-  A_consumo: 'A consumo',
-  [ALTRO_KEY]: 'Misto / Altro',
-};
-const DESC: Record<string, string> = {
-  A_corpo: 'Fatturazione a consegna milestone',
-  A_canone: 'Fatturazione mensile ricorrente',
-  A_consumo: 'Fatturazione a misura (GG/Uomo)',
-  [ALTRO_KEY]: 'Modalità composte (es. canone + corpo) o non classificate',
-};
-const MCOL: Record<string, string> = { A_corpo: C.petrol, A_canone: C.gold, A_consumo: C.slate, [ALTRO_KEY]: C.slateL };
-const MOD_TO_KEY: Record<string, string> = { 'A corpo': 'A_corpo', 'A canone': 'A_canone', 'A consumo': 'A_consumo' };
-const BUCKET_ORDER = ['A_corpo', 'A_canone', 'A_consumo', ALTRO_KEY];
+import { ChartCard } from '../export/ExportControls';
+import ModalitaTable from './modalita/ModalitaTable';
+import { buildModalitaBars, buildModalitaDonut } from './modalita/modalitaHtml';
 
 function ModalitaPanel({
   interventi,
@@ -36,47 +17,15 @@ function ModalitaPanel({
   // Computed live from the (already filtered) portfolio in view, so this panel
   // reacts to FilterBar/uploads/edits like every other panel — it previously
   // read a static seed snapshot that never changed and never respected filters.
-  const agg: Record<string, { n: number; costo: number }> = {};
-  for (const i of interventi) {
-    const key = (i.modalita_if && MOD_TO_KEY[i.modalita_if]) || ALTRO_KEY;
-    if (!agg[key]) agg[key] = { n: 0, costo: 0 };
-    agg[key].n += 1;
-    agg[key].costo += i.importo || 0;
-  }
-  const modalita = BUCKET_ORDER.filter((k) => agg[k]).map((k) => ({ mod: k, ...agg[k] }));
-  const tot = modalita.reduce((s, m) => s + m.costo, 0) || 1;
-
-  const modDonut = modalita.length
-    ? donut(
-        modalita.map((m) => ({
-          label: `${MODLAB[m.mod] || m.mod} · ${PCT((m.costo / tot) * 100)}`,
-          v: m.costo,
-          c: MCOL[m.mod] || C.slateL,
-          tip: `${MODLAB[m.mod] || m.mod}\n${EUR(m.costo)} · ${PCT((m.costo / tot) * 100)} · ${m.n} IF`,
-        })),
-        '',
-        '',
-      )
-    : '<div class="empty">Nessun dato</div>';
-
-  const modBars = modalita.length
-    ? chartVBars(
-        modalita.map((m) => ({
-          label: MODLAB[m.mod] || m.mod,
-          val: m.n,
-          color: MCOL[m.mod] || C.slateL,
-          drill: MODLAB[m.mod],
-          tip: `${MODLAB[m.mod] || m.mod}\nN° IF: ${m.n}\nCosto: ${EUR(m.costo)}\n(clic per vedere gli IF)`,
-        })),
-      )
-    : '';
+  const { rows: modalita, tot } = aggregateModalita(interventi);
+  const modDonut = buildModalitaDonut(modalita, tot);
+  const modBars = buildModalitaBars(modalita);
 
   const onDrill = (e: React.MouseEvent<HTMLDivElement>) => {
     const t = (e.target as HTMLElement).closest('[data-drill-mod]') as HTMLElement | null;
     if (t) onDrillMod(t.getAttribute('data-drill-mod') || '');
   };
 
-  const tblRef = useRef<HTMLDivElement>(null);
 
   return (
     <div className="panel on" data-p="4">
@@ -100,39 +49,7 @@ function ModalitaPanel({
           <Html html={modBars} onClick={onDrill} />
         </ChartCard>
       </div>
-      <div className="tablecard">
-        <div className="tbar">
-          <h3>Dettaglio modalità fornitura</h3>
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted)' }}>clic su una riga per gli IF ↗</span>
-          <CopyTableButton targetRef={tblRef} />
-        </div>
-        <div className="tscroll" ref={tblRef}>
-          <table className="dtable">
-            <thead>
-              <tr>
-                <th>Modalità</th>
-                <th className="num">N° IF</th>
-                <th className="num">Costo totale (€)</th>
-                <th className="num">% valore</th>
-                <th>Descrizione</th>
-              </tr>
-            </thead>
-            <tbody>
-              {modalita.map((m) => (
-                <tr key={m.mod} style={{ cursor: 'pointer' }} onClick={() => onDrillMod(MODLAB[m.mod])}>
-                  <td>
-                    <b>{MODLAB[m.mod] || m.mod}</b>
-                  </td>
-                  <td className="num">{m.n}</td>
-                  <td className="num">{EUR0(m.costo)} €</td>
-                  <td className="num">{PCT((m.costo / tot) * 100)}</td>
-                  <td style={{ color: 'var(--muted)' }}>{DESC[m.mod] || ''} ↗</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <ModalitaTable modalita={modalita} tot={tot} onDrillMod={onDrillMod} />
       <div className="foot" style={{ marginTop: 14 }}>
         <b>Note:</b> A_corpo = fatturazione a consegna milestone · A_canone = fatturazione mensile ricorrente · A_consumo =
         fatturazione a misura (GG/Uomo).

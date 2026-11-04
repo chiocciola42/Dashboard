@@ -1,228 +1,13 @@
 'use client';
 import React, { useDeferredValue, useMemo, useState } from 'react';
-import type { DocStatus, Intervento, InterventoInput, ReportPdcRecord, VerbaleSalRecord, BefRow } from '@/lib/types';
-import { EUR0, dfmt, ICO } from '@/lib/format';
-import InlineField from '../editing/InlineField';
-import StatusSelect from '../editing/StatusSelect';
+import type { Intervento, InterventoInput } from '@/lib/types';
+import { EUR0 } from '@/lib/format';
+import { exportMatrix, filterAndSort, nextSort, type SortKey } from '@/lib/dettaglioIF';
 import { CopyTableButton } from '../export/ExportControls';
-import type { Matrix } from '@/lib/exportTable';
-
-// Mirrors the "📋 Dettaglio IF" export: stessa sequenza di colonne, stessi
-// campi. ICO fornisce colore/etichetta/glifo condivisi con il resto della app.
-function DocPill({ v }: { v: DocStatus }) {
-  const [color, label, glyph] = ICO[v];
-  return (
-    <span className="pill" style={{ background: 'color-mix(in srgb, ' + color + ' 14%, #fff)', color }}>
-      {glyph} {label}
-    </span>
-  );
-}
-
-// Free-text stato (PDC/SAL) -> traffic-light color. These fields come from
-// the source exports as free text ("PDC Approvata", "Verbale Conforme", …),
-// not the fixed DocStatus enum, so match on keywords instead.
-function statusColor(s: string | null): string {
-  const t = (s || '').toLowerCase();
-  if (!t) return 'var(--slate-l)';
-  if (/(assente|mancante|non conforme|rifiutat)/.test(t)) return 'var(--bad)';
-  if (/(approvat|conforme|^ok$|firmat)/.test(t)) return 'var(--good)';
-  return 'var(--amber-d)';
-}
-
-// "MM/YYYY" -> sortable key (blank/unparsable periods sort last).
-function periodKey(p: string | null): number {
-  const m = (p || '').match(/^(\d{1,2})\/(\d{4})$/);
-  return m ? Number(m[2]) * 100 + Number(m[1]) : Infinity;
-}
-
-type MonthlyData = { pdc: ReportPdcRecord[]; sal: VerbaleSalRecord[]; bef: BefRow[] };
-
-// Titolo di una colonna del dettaglio mensile con il pulsante di copia: le tre
-// tabelle sono piccole ma restano dati che finiscono in Excel come le altre.
-function MonthlyHead({ title, matrix }: { title: string; matrix: Matrix | null }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-      <h5>{title}</h5>
-      {matrix && (
-        <CopyTableButton
-          style={{ marginLeft: 'auto' }}
-          label="Copia"
-          title={`Copia "${title}" per Excel`}
-          getMatrix={() => matrix}
-        />
-      )}
-    </div>
-  );
-}
-
-// Dettaglio mensile per BO: PDC (report_pdc), Verbali SAL (verbali_sal) e BEF
-// (bef_records), caricati on-demand dalla riga/card espansa.
-function MonthlyDetail({ state }: { state: MonthlyData | 'loading' | 'error' }) {
-  if (state === 'loading') return <div className="monthly-empty">Caricamento dettaglio mensile…</div>;
-  if (state === 'error') return <div className="monthly-empty">Impossibile caricare il dettaglio mensile.</div>;
-  const pdc = [...state.pdc].sort((a, b) => periodKey(a.periodo_pdc) - periodKey(b.periodo_pdc));
-  const sal = [...state.sal].sort((a, b) => periodKey(a.periodo_competenza) - periodKey(b.periodo_competenza));
-  const bef = [...state.bef].sort((a, b) => periodKey(a.periodo_competenza) - periodKey(b.periodo_competenza));
-  return (
-    <div className="monthly-grid">
-      <div className="monthly-col">
-        <MonthlyHead
-          title="PDC mensile"
-          matrix={
-            pdc.length
-              ? [
-                  ['Periodo', 'Stato', 'Codice'],
-                  ...pdc.map((r) => [r.periodo_pdc || '', r.stato_pdc || '', r.codice_pdc || '']),
-                ]
-              : null
-          }
-        />
-        {pdc.length ? (
-          <table className="monthly-tbl">
-            <thead>
-              <tr>
-                <th>Periodo</th>
-                <th>Stato</th>
-                <th>Codice</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pdc.map((r, i) => (
-                <tr key={i}>
-                  <td>{r.periodo_pdc || '—'}</td>
-                  <td style={{ color: statusColor(r.stato_pdc) }}>{r.stato_pdc || '—'}</td>
-                  <td className="codecell">{r.codice_pdc || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="monthly-empty">Nessuna PDC registrata per questo BO.</div>
-        )}
-      </div>
-      <div className="monthly-col">
-        <MonthlyHead
-          title="Verbali SAL mensili"
-          matrix={
-            sal.length
-              ? [
-                  ['Periodo', 'Stato verbale', 'Conforme'],
-                  ...sal.map((r) => [r.periodo_competenza || '', r.stato_verbale || '', r.conforme || '']),
-                ]
-              : null
-          }
-        />
-        {sal.length ? (
-          <table className="monthly-tbl">
-            <thead>
-              <tr>
-                <th>Periodo</th>
-                <th>Stato verbale</th>
-                <th>Conforme</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sal.map((r, i) => (
-                <tr key={i}>
-                  <td>{r.periodo_competenza || '—'}</td>
-                  <td style={{ color: statusColor(r.stato_verbale) }}>{r.stato_verbale || '—'}</td>
-                  <td style={{ color: statusColor(r.conforme) }}>{r.conforme || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="monthly-empty">Nessun verbale SAL registrato per questo BO.</div>
-        )}
-      </div>
-      <div className="monthly-col">
-        <MonthlyHead
-          title="BEF mensili"
-          matrix={
-            bef.length
-              ? [
-                  ['Periodo', 'Importo', 'Fattura'],
-                  ...bef.map((r) => [
-                    r.periodo_competenza || '',
-                    r.importo_ricezione != null ? eurPlain(r.importo_ricezione) : '',
-                    r.num_fattura || 'fatturabile',
-                  ]),
-                ]
-              : null
-          }
-        />
-        {bef.length ? (
-          <table className="monthly-tbl">
-            <thead>
-              <tr>
-                <th>Periodo</th>
-                <th>Importo</th>
-                <th>Fattura</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bef.map((r, i) => (
-                <tr key={i}>
-                  <td>{r.periodo_competenza || '—'}</td>
-                  <td className="num">{r.importo_ricezione != null ? EUR0(r.importo_ricezione) : '—'}</td>
-                  <td style={{ color: r.num_fattura ? 'var(--good)' : 'var(--slate-l)' }}>
-                    {r.num_fattura || 'fatturabile'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="monthly-empty">Nessun BEF registrato per questo IF.</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Intestazioni e righe condivise fra l'export CSV e la copia per Excel.
-const EXPORT_HEAD = [
-  'Ambito', 'N° IF', 'N° BO', 'Titolo Intervento', 'Data Inizio', 'Data Fine', 'Ref. ARIA', 'Ref. Fornitore',
-  'Fornitore', 'Importo (€)', 'Modalità', 'Stato BO', 'PDC', 'V. Apertura', 'V. SAL', 'BEF', 'Azione Richiesta',
-];
-
-// Per Excel i decimali vanno separati dalla virgola (locale it-IT) e senza
-// separatore di migliaia, altrimenti la cella resta testo.
-const eurPlain = (n: number) => Number(n || 0).toFixed(2).replace('.', ',');
-const docLabel = (v: DocStatus) => ICO[v][1];
-
-function exportRow(x: Intervento): (string | number)[] {
-  return [
-    x.ambito || '', x.numero_if, x.bdo || '', x.titolo, dfmt(x.data_inizio), dfmt(x.data_fine), x.ref_aria || '',
-    x.ref_fornitore || '', x.fornitore, eurPlain(x.importo), x.modalita_if || '', x.has_bo ? 'BO emesso' : 'In attesa',
-    docLabel(x.pdc), docLabel(x.v_apertura), docLabel(x.v_sal), docLabel(x.bef), x.azione || '',
-  ];
-}
-
-function exportMatrix(IFs: Intervento[]): Matrix {
-  return [EXPORT_HEAD, ...IFs.map(exportRow)];
-}
-
-function exportCSV(IFs: Intervento[]) {
-  const head = EXPORT_HEAD;
-  const rows = IFs.map(exportRow);
-  const csv = [head, ...rows]
-    .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';'))
-    .join('\r\n');
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'Dettaglio_IF.csv';
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(url);
-    a.remove();
-  }, 800);
-}
-
-type SortKey = keyof Intervento;
+import IfTableView from './dettaglio/IfTableView';
+import IfCardsView from './dettaglio/IfCardsView';
+import { useMonthlyDetail } from './dettaglio/useMonthlyDetail';
+import { downloadDettaglioCsv } from './dettaglio/downloadCsv';
 
 function DettaglioIFPanel({
   IFs,
@@ -246,79 +31,12 @@ function DettaglioIFPanel({
   const [view, setView] = useState<'table' | 'card'>('table');
   const [q, setQ] = useState('');
   const deferredQ = useDeferredValue(q);
-  const [sortK, setSortK] = useState<SortKey>('numero_if');
-  const [sortDir, setSortDir] = useState(1);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [monthly, setMonthly] = useState<Record<string, MonthlyData | 'loading' | 'error'>>({});
+  const [sort, setSort] = useState<{ key: SortKey; dir: number }>({ key: 'numero_if', dir: 1 });
+  const { expanded, monthly, toggleMonthly } = useMonthlyDetail();
 
-  const toggleMonthly = (numero_if: string) => {
-    setExpanded((s) => {
-      const n = new Set(s);
-      if (n.has(numero_if)) n.delete(numero_if);
-      else n.add(numero_if);
-      return n;
-    });
-    if (!monthly[numero_if]) {
-      setMonthly((m) => ({ ...m, [numero_if]: 'loading' }));
-      fetch(`/api/interventi/${encodeURIComponent(numero_if)}/monthly`)
-        .then((res) => (res.ok ? res.json() : Promise.reject()))
-        .then((data) => setMonthly((m) => ({ ...m, [numero_if]: { pdc: data.pdc, sal: data.sal, bef: data.bef } })))
-        .catch(() => setMonthly((m) => ({ ...m, [numero_if]: 'error' })));
-    }
-  };
-
-  const rows = useMemo(() => {
-    const query = deferredQ.toLowerCase().trim();
-    const num = sortK === 'importo';
-    return IFs.filter(
-      (x) =>
-        !query ||
-        [x.numero_if, x.bdo, x.titolo, x.ambito, x.ref_aria, x.ref_fornitore, x.fornitore, x.modalita_if, x.azione]
-          .join(' ')
-          .toLowerCase()
-          .includes(query),
-    ).sort((a, b) => {
-      let va: string | number = a[sortK] as never;
-      let vb: string | number = b[sortK] as never;
-      if (num) {
-        va = Number(va) || 0;
-        vb = Number(vb) || 0;
-      } else {
-        va = (va == null ? '' : String(va)).toLowerCase();
-        vb = (vb == null ? '' : String(vb)).toLowerCase();
-      }
-      return va < vb ? -sortDir : va > vb ? sortDir : 0;
-    });
-  }, [IFs, deferredQ, sortK, sortDir]);
-
-  const sort = (k: SortKey) => {
-    if (sortK === k) setSortDir((d) => d * -1);
-    else {
-      setSortK(k);
-      setSortDir(k === 'importo' ? -1 : 1);
-    }
-  };
-
+  const rows = useMemo(() => filterAndSort(IFs, deferredQ, sort.key, sort.dir), [IFs, deferredQ, sort]);
+  const onSort = (k: SortKey) => setSort((cur) => nextSort(cur, k));
   const sumShown = rows.reduce((s, x) => s + x.importo, 0);
-  const cols: [SortKey, string][] = [
-    ['ambito', 'Ambito'],
-    ['numero_if', 'N° IF'],
-    ['bdo', 'N° BO'],
-    ['titolo', 'Titolo Intervento'],
-    ['data_inizio', 'Data Inizio'],
-    ['data_fine', 'Data Fine'],
-    ['ref_aria', 'Ref. ARIA'],
-    ['ref_fornitore', 'Ref. Fornitore'],
-    ['fornitore', 'Fornitore'],
-    ['importo', 'Importo (€)'],
-    ['modalita_if', 'Modalità'],
-    ['has_bo', 'Stato BO'],
-    ['pdc', 'PDC'],
-    ['v_apertura', 'V. Apertura'],
-    ['v_sal', 'V. SAL'],
-    ['bef', 'BEF'],
-    ['azione', 'Azione Richiesta'],
-  ];
 
   return (
     <div className="panel on" data-p="7">
@@ -352,7 +70,7 @@ function DettaglioIFPanel({
             getMatrix={() => exportMatrix(rows)}
             title="Copia tutti gli IF mostrati (tutte le colonne): incollali in un foglio Excel"
           />
-          <button className="freset" onClick={() => exportCSV(rows)} style={{ borderColor: 'var(--petrol)', color: 'var(--petrol-d)' }}>
+          <button className="freset" onClick={() => downloadDettaglioCsv(rows)} style={{ borderColor: 'var(--petrol)', color: 'var(--petrol-d)' }}>
             ⤓ Esporta CSV
           </button>
           <div className="tot">
@@ -360,259 +78,35 @@ function DettaglioIFPanel({
           </div>
         </div>
 
+
         {view === 'table' ? (
-          <div className="tscroll">
-            <table id="tbl-dif">
-              <thead>
-                <tr>
-                  <th aria-label="Dettaglio mensile" />
-                  {cols.map(([k, label]) => (
-                    <th
-                      key={k}
-                      className={k === 'titolo' ? 'thtt' : undefined}
-                      onClick={() => sort(k)}
-                      style={{ cursor: 'pointer' }}
-                      aria-sort={sortK === k ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
-                    >
-                      {label}
-                      {sortK === k && <span aria-hidden="true"> {sortDir === 1 ? '▲' : '▼'}</span>}
-                    </th>
-                  ))}
-                  {canEdit && <th>Azioni</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((x) => {
-                  const saving = savingIds.has(x.numero_if);
-                  const hl = highlightIds.has(x.numero_if);
-                  const isOpen = expanded.has(x.numero_if);
-                  return (
-                    <React.Fragment key={x.numero_if}>
-                    <tr className={hl ? 'row-saved' : ''} style={saving ? { opacity: 0.55 } : undefined}>
-                      <td>
-                        <button
-                          className="iconbtn"
-                          title="Dettaglio mensile PDC / SAL / BEF"
-                          aria-expanded={isOpen}
-                          onClick={() => toggleMonthly(x.numero_if)}
-                        >
-                          {isOpen ? '▾' : '▸'}
-                        </button>
-                      </td>
-                      <td>{x.ambito || '—'}</td>
-                      <td className="codecell">{x.numero_if}</td>
-                      <td className="codecell" style={{ color: 'var(--muted)' }}>
-                        {x.bdo || '—'}
-                      </td>
-                      <td className="tt">
-                        <details className="ttd">
-                          <summary title="Clic per espandere/comprimere il testo">
-                            <b>{x.titolo}</b>
-                            {x.subappalto && <span className="pill sub" style={{ marginLeft: 6 }}>sub</span>}
-                          </summary>
-                        </details>
-                      </td>
-                      <td className="codecell" style={{ color: 'var(--muted)' }}>
-                        {canEdit ? (
-                          <InlineField type="date" value={x.data_inizio} display={dfmt(x.data_inizio)} onSave={(v) => onSaveField(x.numero_if, { data_inizio: v || null })} />
-                        ) : (
-                          dfmt(x.data_inizio)
-                        )}
-                      </td>
-                      <td className="codecell" style={{ color: 'var(--muted)' }}>
-                        {canEdit ? (
-                          <InlineField type="date" value={x.data_fine} display={dfmt(x.data_fine)} onSave={(v) => onSaveField(x.numero_if, { data_fine: v || null })} />
-                        ) : (
-                          dfmt(x.data_fine)
-                        )}
-                      </td>
-                      <td>{x.ref_aria || '—'}</td>
-                      <td>{x.ref_fornitore || '—'}</td>
-                      <td>
-                        <span className={'pill f-' + x.fornitore}>{x.fornitore}</span>
-                      </td>
-                      <td className="num">
-                        {canEdit ? (
-                          <InlineField type="number" value={x.importo} display={EUR0(x.importo)} onSave={(v) => onSaveField(x.numero_if, { importo: Number(v) || 0 })} />
-                        ) : (
-                          EUR0(x.importo)
-                        )}
-                      </td>
-                      <td>
-                        {canEdit ? (
-                          <InlineField value={x.modalita_if} onSave={(v) => onSaveField(x.numero_if, { modalita_if: v })} />
-                        ) : (
-                          x.modalita_if || '—'
-                        )}
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        <span className={'pill ' + (x.has_bo ? 'bo' : 'nobo')}>{x.has_bo ? 'BO emesso' : 'In attesa'}</span>
-                      </td>
-                      {(['pdc', 'v_apertura', 'v_sal', 'bef'] as const).map((k) => (
-                        <td key={k} style={{ textAlign: 'center' }}>
-                          {canEdit ? (
-                            <StatusSelect value={x[k]} disabled={saving} onChange={(v) => onSaveField(x.numero_if, { [k]: v })} />
-                          ) : (
-                            <DocPill v={x[k]} />
-                          )}
-                        </td>
-                      ))}
-                      <td>
-                        {canEdit ? (
-                          <InlineField value={x.azione} onSave={(v) => onSaveField(x.numero_if, { azione: v || null })} className="tt" />
-                        ) : (
-                          x.azione || '—'
-                        )}
-                      </td>
-                      {canEdit && (
-                        <td className="actcell">
-                          <button className="iconbtn" title="Modifica completa" onClick={() => onOpenEdit(x)}>
-                            ✏️
-                          </button>
-                          <button
-                            className="iconbtn"
-                            title="Elimina"
-                            onClick={() => {
-                              if (window.confirm(`Eliminare l'IF ${x.numero_if}? (soft-delete)`)) onDelete(x.numero_if);
-                            }}
-                          >
-                            🗑️
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                    {isOpen && (
-                      <tr data-export-ignore>
-                        <td colSpan={cols.length + 1 + (canEdit ? 1 : 0)} className="monthly-row">
-                          <MonthlyDetail state={monthly[x.numero_if] || 'loading'} />
-                        </td>
-                      </tr>
-                    )}
-                    </React.Fragment>
-                  );
-                })}
-                {rows.length === 0 && (
-                  <tr>
-                    <td colSpan={cols.length + 1 + (canEdit ? 1 : 0)} style={{ color: 'var(--muted)', padding: 18 }}>
-                      Nessun IF in questa vista.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <IfTableView
+            rows={rows}
+            canEdit={canEdit}
+            sortK={sort.key}
+            sortDir={sort.dir}
+            onSort={onSort}
+            savingIds={savingIds}
+            highlightIds={highlightIds}
+            expanded={expanded}
+            monthly={monthly}
+            onToggleMonthly={toggleMonthly}
+            onSaveField={onSaveField}
+            onOpenEdit={onOpenEdit}
+            onDelete={onDelete}
+          />
         ) : (
-          <div className="difcards">
-            {rows.map((x) => {
-              const saving = savingIds.has(x.numero_if);
-              const hl = highlightIds.has(x.numero_if);
-              return (
-                <div key={x.numero_if} className={'difcard' + (hl ? ' row-saved' : '')} style={saving ? { opacity: 0.55 } : undefined}>
-                  <div className="difcard-head">
-                    <div>
-                      <span className="codecell">{x.numero_if}</span>
-                      {x.ambito && <span className="pill" style={{ marginLeft: 6 }}>{x.ambito}</span>}
-                      {x.subappalto && <span className="pill sub" style={{ marginLeft: 6 }}>sub</span>}
-                    </div>
-                    <span className={'pill f-' + x.fornitore}>{x.fornitore}</span>
-                  </div>
-                  <h4 className="difcard-title">{x.titolo}</h4>
-                  <div className="difcard-meta">
-                    <span>N° BO: <b>{x.bdo || '—'}</b></span>
-                    <span>Ref. ARIA: <b>{x.ref_aria || '—'}</b></span>
-                    <span>Ref. Fornitore: <b>{x.ref_fornitore || '—'}</b></span>
-                  </div>
-                  <div className="difcard-meta">
-                    <span>
-                      Inizio:{' '}
-                      {canEdit ? (
-                        <InlineField type="date" value={x.data_inizio} display={dfmt(x.data_inizio)} onSave={(v) => onSaveField(x.numero_if, { data_inizio: v || null })} />
-                      ) : (
-                        <b>{dfmt(x.data_inizio)}</b>
-                      )}
-                    </span>
-                    <span>
-                      Fine:{' '}
-                      {canEdit ? (
-                        <InlineField type="date" value={x.data_fine} display={dfmt(x.data_fine)} onSave={(v) => onSaveField(x.numero_if, { data_fine: v || null })} />
-                      ) : (
-                        <b>{dfmt(x.data_fine)}</b>
-                      )}
-                    </span>
-                    <span>
-                      Modalità:{' '}
-                      {canEdit ? (
-                        <InlineField value={x.modalita_if} onSave={(v) => onSaveField(x.numero_if, { modalita_if: v })} />
-                      ) : (
-                        <b>{x.modalita_if || '—'}</b>
-                      )}
-                    </span>
-                  </div>
-                  <div className="difcard-amount">
-                    {canEdit ? (
-                      <InlineField
-                        type="number"
-                        value={x.importo}
-                        display={'€ ' + EUR0(x.importo)}
-                        onSave={(v) => onSaveField(x.numero_if, { importo: Number(v) || 0 })}
-                      />
-                    ) : (
-                      '€ ' + EUR0(x.importo)
-                    )}
-                    <span className={'pill ' + (x.has_bo ? 'bo' : 'nobo')} style={{ marginLeft: 10 }}>
-                      {x.has_bo ? 'BO emesso' : 'In attesa'}
-                    </span>
-                  </div>
-                  <div className="difcard-docs">
-                    {(['pdc', 'v_apertura', 'v_sal', 'bef'] as const).map((k) => (
-                      <div className="difcard-doc" key={k}>
-                        <span className="difcard-doc-label">{{ pdc: 'PDC', v_apertura: 'V. Apertura', v_sal: 'V. SAL', bef: 'BEF' }[k]}</span>
-                        {canEdit ? (
-                          <StatusSelect value={x[k]} disabled={saving} onChange={(v) => onSaveField(x.numero_if, { [k]: v })} />
-                        ) : (
-                          <DocPill v={x[k]} />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="difcard-azione">
-                    <span className="difcard-doc-label">Azione Richiesta</span>
-                    {canEdit ? (
-                      <InlineField value={x.azione} onSave={(v) => onSaveField(x.numero_if, { azione: v || null })} />
-                    ) : (
-                      <span>{x.azione || '—'}</span>
-                    )}
-                  </div>
-                  <details
-                    className="difcard-monthly"
-                    onToggle={(e) => {
-                      if ((e.target as HTMLDetailsElement).open) toggleMonthly(x.numero_if);
-                    }}
-                  >
-                    <summary>Dettaglio mensile PDC / SAL / BEF</summary>
-                    <MonthlyDetail state={monthly[x.numero_if] || 'loading'} />
-                  </details>
-                  {canEdit && (
-                    <div className="difcard-actions">
-                      <button className="iconbtn" title="Modifica completa" onClick={() => onOpenEdit(x)}>
-                        ✏️ Modifica
-                      </button>
-                      <button
-                        className="iconbtn"
-                        title="Elimina"
-                        onClick={() => {
-                          if (window.confirm(`Eliminare l'IF ${x.numero_if}? (soft-delete)`)) onDelete(x.numero_if);
-                        }}
-                      >
-                        🗑️ Elimina
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {rows.length === 0 && <div className="empty">Nessun IF in questa vista.</div>}
-          </div>
+          <IfCardsView
+            rows={rows}
+            canEdit={canEdit}
+            savingIds={savingIds}
+            highlightIds={highlightIds}
+            monthly={monthly}
+            onToggleMonthly={toggleMonthly}
+            onSaveField={onSaveField}
+            onOpenEdit={onOpenEdit}
+            onDelete={onDelete}
+          />
         )}
       </div>
       <div className="foot" style={{ marginTop: 10 }}>

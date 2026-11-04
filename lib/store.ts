@@ -394,88 +394,113 @@ function mergeUpload(existing: Intervento, inc: Intervento, force: boolean): Int
   };
 }
 
+// Rows per INSERT statement and parallel UPDATEs per round: both bound the size
+// of a single request to the database.
+const INSERT_CHUNK = 100;
+const UPDATE_CHUNK = 8;
+
+// Current records (soft-deleted ones included) for the given ids.
+async function loadExisting(ids: string[]): Promise<Map<string, Intervento>> {
+  const existingById = new Map<string, Intervento>();
+  if (!hasDB) {
+    for (const id of ids) {
+      const e = await getInterventoAny(id);
+      if (e) existingById.set(id, e);
+    }
+    return existingById;
+  }
+  await ensureDbReady();
+  if (ids.length === 0) return existingById;
+  const rows = await getDb().select().from(interventiTable).where(inArray(interventiTable.numero_if, ids));
+  for (const r of rows) existingById.set(r.numero_if, rowToIntervento(r));
+  return existingById;
+}
+
+type UploadPlan = {
+  inserts: Map<string, Intervento>;
+  updates: Map<string, Intervento>;
+  insertedIfs: string[];
+  updatedIfs: string[];
+  skippedIfs: string[];
+};
+
+// Decides, per incoming row, whether it is an insert, an update or a skip.
+// Classified sequentially so duplicate numero_if rows inside the same file still
+// merge onto each other exactly like a one-by-one flow would.
+function planUpload(incoming: Intervento[], existingById: Map<string, Intervento>, force: boolean): UploadPlan {
+  const plan: UploadPlan = { inserts: new Map(), updates: new Map(), insertedIfs: [], updatedIfs: [], skippedIfs: [] };
+  for (const inc of incoming) {
+    const id = inc.numero_if;
+    const pending = plan.inserts.get(id) ?? plan.updates.get(id);
+    const existing = pending ?? existingById.get(id);
+    if (!existing) {
+      plan.inserts.set(id, inc);
+      plan.insertedIfs.push(id);
+      continue;
+    }
+    if (!pending && existing.edited_manually && !force) {
+      plan.skippedIfs.push(id);
+      continue;
+    }
+    const merged = mergeUpload(existing, inc, force);
+    if (plan.inserts.has(id)) {
+      plan.inserts.set(id, merged);
+      continue;
+    }
+    if (!plan.updates.has(id)) plan.updatedIfs.push(id);
+    plan.updates.set(id, merged);
+  }
+  return plan;
+}
+
+async function writeUploadToDb(inserts: Map<string, Intervento>, updates: Map<string, Intervento>): Promise<void> {
+  const insertRows = [...inserts.values()].map(interventoToRow);
+  for (let i = 0; i < insertRows.length; i += INSERT_CHUNK) {
+    await getDb().insert(interventiTable).values(insertRows.slice(i, i + INSERT_CHUNK));
+  }
+  const updEntries = [...updates.entries()];
+  for (let i = 0; i < updEntries.length; i += UPDATE_CHUNK) {
+    await Promise.all(
+      updEntries.slice(i, i + UPDATE_CHUNK).map(([id, rec]) =>
+        getDb()
+          .update(interventiTable)
+          .set({ ...interventoToRow(rec), deleted_at: null, updated_at: new Date() })
+          .where(eq(interventiTable.numero_if, id)),
+      ),
+    );
+  }
+}
+
+async function writeUploadToMem(inserts: Map<string, Intervento>, updates: Map<string, Intervento>): Promise<void> {
+  for (const rec of inserts.values()) await rawInsert(rec);
+  for (const [id, rec] of updates) await rawUpdate(id, rec);
+}
+
 // Upsert from an Excel upload. Records flagged edited_manually are preserved
 // unless `force` is set.
 //
 // With the neon-http driver every query is an HTTP round-trip, so the previous
 // one-query-per-row flow made large uploads cost hundreds of sequential
-// round-trips. Now: one batched read of the existing records, one batched
-// insert, and the per-row updates run in parallel chunks.
+// round-trips. Now: one batched read of the existing records, batched inserts,
+// and the per-row updates run in parallel chunks.
 export async function upsertInterventiFromUpload(
   incoming: Intervento[],
   force = false,
 ): Promise<UploadResult> {
-  const insertedIfs: string[] = [];
-  const updatedIfs: string[] = [];
-  const skippedIfs: string[] = [];
-
   const ids = [...new Set(incoming.map((i) => i.numero_if))];
-  const existingById = new Map<string, Intervento>();
-  if (hasDB) {
-    await ensureDbReady();
-    if (ids.length) {
-      const rows = await getDb().select().from(interventiTable).where(inArray(interventiTable.numero_if, ids));
-      for (const r of rows) existingById.set(r.numero_if, rowToIntervento(r));
-    }
-  } else {
-    for (const id of ids) {
-      const e = await getInterventoAny(id);
-      if (e) existingById.set(id, e);
-    }
-  }
+  const existingById = await loadExisting(ids);
+  const plan = planUpload(incoming, existingById, force);
 
-  // Classify sequentially so duplicate numero_if rows inside the same file
-  // still merge onto each other exactly like the previous one-by-one flow.
-  const inserts = new Map<string, Intervento>();
-  const updates = new Map<string, Intervento>();
-  for (const inc of incoming) {
-    const pending = inserts.get(inc.numero_if) ?? updates.get(inc.numero_if);
-    const existing = pending ?? existingById.get(inc.numero_if);
-    if (!existing) {
-      inserts.set(inc.numero_if, inc);
-      insertedIfs.push(inc.numero_if);
-    } else if (!pending && existing.edited_manually && !force) {
-      skippedIfs.push(inc.numero_if);
-    } else {
-      const merged = mergeUpload(existing, inc, force);
-      if (inserts.has(inc.numero_if)) {
-        inserts.set(inc.numero_if, merged);
-      } else {
-        if (!updates.has(inc.numero_if)) updatedIfs.push(inc.numero_if);
-        updates.set(inc.numero_if, merged);
-      }
-    }
-  }
-
-  if (hasDB) {
-    const insertRows = [...inserts.values()].map(interventoToRow);
-    for (let i = 0; i < insertRows.length; i += 100) {
-      await getDb().insert(interventiTable).values(insertRows.slice(i, i + 100));
-    }
-    const updEntries = [...updates.entries()];
-    const CHUNK = 8;
-    for (let i = 0; i < updEntries.length; i += CHUNK) {
-      await Promise.all(
-        updEntries.slice(i, i + CHUNK).map(([id, rec]) =>
-          getDb()
-            .update(interventiTable)
-            .set({ ...interventoToRow(rec), deleted_at: null, updated_at: new Date() })
-            .where(eq(interventiTable.numero_if, id)),
-        ),
-      );
-    }
-  } else {
-    for (const rec of inserts.values()) await rawInsert(rec);
-    for (const [id, rec] of updates) await rawUpdate(id, rec);
-  }
+  if (hasDB) await writeUploadToDb(plan.inserts, plan.updates);
+  else await writeUploadToMem(plan.inserts, plan.updates);
 
   return {
-    inserted: insertedIfs.length,
-    updated: updatedIfs.length,
-    skipped: skippedIfs.length,
-    insertedIfs,
-    updatedIfs,
-    skippedIfs,
+    inserted: plan.insertedIfs.length,
+    updated: plan.updatedIfs.length,
+    skipped: plan.skippedIfs.length,
+    insertedIfs: plan.insertedIfs,
+    updatedIfs: plan.updatedIfs,
+    skippedIfs: plan.skippedIfs,
   };
 }
 

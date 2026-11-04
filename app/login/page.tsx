@@ -1,5 +1,6 @@
 'use client';
 import React, { Suspense, useState } from 'react';
+import { fetchWithTimeout } from '@/lib/fetchWithTimeout';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -18,7 +19,7 @@ function LoginForm() {
     setBusy(true);
     setError('');
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetchWithTimeout('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
