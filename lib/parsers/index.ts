@@ -61,6 +61,34 @@ export type ParseOutput = {
   mesi?: MonthFact[];
 };
 
+const RECORD_LISTS = [
+  'interventi',
+  'bef',
+  'chiusura',
+  'seniority',
+  'reportBdo',
+  'reportRdi',
+  'verbaliApertura',
+  'verbaliSal',
+  'reportPdc',
+] as const;
+
+// Number of records a parse produced, across every list the kind can fill.
+export function countRecords(parsed: ParseOutput): number {
+  return RECORD_LISTS.reduce((n, k) => n + (parsed[k]?.length ?? 0), 0);
+}
+
+export const EMPTY_IMPORT_MSG =
+  'Nessuna riga importabile nel file: foglio vuoto, intestazioni non riconosciute o nessuna riga del RTI Intellera.';
+
+// Fails an import that would "succeed" while writing nothing (and still bump the
+// "dati al" date): an export with an unexpected layout must be reported, not
+// accepted silently.
+export function emptyImportError(parsed: ParseOutput): string | null {
+  if (parsed.kind === 'unknown') return null;
+  return countRecords(parsed) === 0 ? EMPTY_IMPORT_MSG : null;
+}
+
 export function parseFile(filename: string, buf: ArrayBuffer | Buffer): ParseOutput {
   const kind = detectKind(filename);
   switch (kind) {

@@ -86,7 +86,7 @@ export default function UploadPage() {
       // Parse the spreadsheet in the browser and send only the extracted
       // records as JSON. This keeps the request tiny and sidesteps the
       // serverless request-body size limit (~4.5MB) that rejects large files.
-      const { parseFile } = await import('@/lib/parsers');
+      const { parseFile, emptyImportError } = await import('@/lib/parsers');
       setProgress(30);
       const ab = await file.arrayBuffer();
       let parsed;
@@ -102,6 +102,11 @@ export default function UploadPage() {
           error:
             'Tipo file non riconosciuto. Il nome deve contenere Dashboard / IF_ARIA / BEF / Chiusura / Aggregatore, oppure il file deve contenere il foglio "REPORT Bdo" / "REPORT Rdi" / "REPORT Apertura" / "REPORT Sal" / "REPORT Pdc".',
         });
+        return;
+      }
+      const empty = emptyImportError(parsed);
+      if (empty) {
+        setResult({ ok: false, error: empty });
         return;
       }
       setProgress(55);

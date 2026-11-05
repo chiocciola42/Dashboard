@@ -164,6 +164,12 @@ describe('POST /api/upload — monthly facts', () => {
     expect((await send({ kind: 'dashboard', interventi: [iff('A')] })).status).toBe(401);
   });
 
+  it('REGRESSION: a recognised file that yields no records is refused, not reported as a successful import', async () => {
+    const res = await send({ kind: 'report_pdc', reportPdc: [] });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toMatch(/Nessuna riga importabile/);
+  });
+
   it('rejects an unrecognised file kind', async () => {
     expect((await send({ kind: 'unknown', interventi: [] })).status).toBe(422);
   });

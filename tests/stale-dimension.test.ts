@@ -36,3 +36,13 @@ describe('fogli con dimension obsoleta', () => {
     expect(parseFile('BEF_20261105.xlsx', buf).bef).toHaveLength(2);
   });
 });
+
+describe('emptyImportError', () => {
+  it('flags a recognised kind with no records, and ignores unknown/non-empty parses', async () => {
+    const { emptyImportError, EMPTY_IMPORT_MSG } = await import('@/lib/parsers');
+    expect(emptyImportError({ kind: 'report_pdc', reportPdc: [] })).toBe(EMPTY_IMPORT_MSG);
+    expect(emptyImportError({ kind: 'bef' })).toBe(EMPTY_IMPORT_MSG);
+    expect(emptyImportError({ kind: 'unknown' })).toBeNull();
+    expect(emptyImportError({ kind: 'aggregatore', interventi: [], seniority: [{ codice: 'X' } as never] })).toBeNull();
+  });
+});

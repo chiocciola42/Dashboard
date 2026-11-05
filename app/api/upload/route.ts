@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
-import { parseFile, type FileKind, type ParseOutput } from '@/lib/parsers';
+import { emptyImportError, parseFile, type FileKind, type ParseOutput } from '@/lib/parsers';
 import { normalizeFornitore } from '@/lib/parsers/util';
 import { upsertInterventiFromUpload, listInterventiBase } from '@/lib/store';
 import { persistBefFromUpload } from '@/lib/befStore';
@@ -455,6 +455,8 @@ async function handleJsonUpload(req: Request, force: boolean) {
     seniority: body.seniority,
     mesi,
   };
+  const empty = emptyImportError(parsed);
+  if (empty) return fail(empty, 422);
   const summary = await applyParsed(parsed, force);
   return NextResponse.json({ ok: true, kind, filename: body.filename ?? null, force, ...summary });
 }
@@ -487,6 +489,8 @@ async function handleMultipartUpload(req: Request, force: boolean) {
     return fail(UNKNOWN_KIND_MULTIPART_MSG, 422);
   }
 
+  const empty = emptyImportError(parsed);
+  if (empty) return fail(empty, 422);
   const summary = await applyParsed(parsed, force);
   return NextResponse.json({ ok: true, kind: parsed.kind, filename, force, ...summary });
 }
