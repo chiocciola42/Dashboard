@@ -82,6 +82,17 @@ function buildDefaultFromRow(numericColumns: string[]) {
   };
 }
 
+// Keeps the last row of each natural-key group, preserving first-seen order.
+// A report can legitimately repeat a key (e.g. one PDC listed once per
+// prestazione); handing both rows to a single `INSERT ... ON CONFLICT DO UPDATE`
+// makes Postgres reject the whole statement ("cannot affect row a second
+// time"), so the batch must be unique on the key before it is sent.
+function lastPerKey<T>(rows: T[], keyOf: (r: T) => string): T[] {
+  const byKey = new Map<string, T>();
+  for (const r of rows) byKey.set(keyOf(r), r);
+  return [...byKey.values()];
+}
+
 export function createSnapshotStore<TTable extends PgTable, TRecord extends Record<string, unknown>>(
   config: SnapshotStoreConfig<TTable, TRecord>,
 ) {
@@ -162,7 +173,8 @@ export function createSnapshotStore<TTable extends PgTable, TRecord extends Reco
 
       const getExtra = getExtraKeyValues!;
       const isKeyed = (r: TRecord) => getExtra(r).every((v) => v != null && v !== '');
-      const keyed = rows.filter(isKeyed);
+      const keyOf = (r: TRecord) => JSON.stringify([getScopeValue(r), ...getExtra(r)]);
+      const keyed = lastPerKey(rows.filter(isKeyed), keyOf);
       const unkeyed = rows.filter((r) => !isKeyed(r));
 
       const statements: BatchItem[] = [];
@@ -217,6 +229,22 @@ export function createSnapshotStore<TTable extends PgTable, TRecord extends Reco
         // drizzle-orm/neon-http/session.js).
         await db.batch(statements as [BatchItem, ...BatchItem[]]);
       }
+      return { saved: keyed.length + unkeyed.length };
+    }
+
+    // In-memory twin of the two strategies above. Append-only tables keep
+    // earlier rows and add only those not already stored (same multiset rule as
+    // `insertMissing`); keyed tables are replaced per scope value.
+    if (!extraKeyColumns || !extraKeyColumns.length) {
+      const remaining = new Map<string, number>();
+      for (const r of mem()) remaining.set(JSON.stringify(r), (remaining.get(JSON.stringify(r)) ?? 0) + 1);
+      const fresh = rows.filter((r) => {
+        const k = JSON.stringify(r);
+        const left = remaining.get(k) ?? 0;
+        if (left > 0) remaining.set(k, left - 1);
+        return left === 0;
+      });
+      mem().push(...fresh);
       return { saved: rows.length };
     }
 
@@ -224,9 +252,12 @@ export function createSnapshotStore<TTable extends PgTable, TRecord extends Reco
       const v = getScopeValue(r);
       return !v || !scopeList.includes(v);
     });
-    kept.push(...rows);
+    const keyOf = (r: TRecord) => JSON.stringify([getScopeValue(r), ...getExtraKeyValues!(r)]);
+    const isKeyed = (r: TRecord) => getExtraKeyValues!(r).every((v) => v != null && v !== '');
+    const stored = [...lastPerKey(rows.filter(isKeyed), keyOf), ...rows.filter((r) => !isKeyed(r))];
+    kept.push(...stored);
     (globalThis as unknown as Record<string, TRecord[]>)[memGlobalKey] = kept;
-    return { saved: rows.length };
+    return { saved: stored.length };
   }
 
   async function listByScope(scopeValue: string): Promise<TRecord[]> {

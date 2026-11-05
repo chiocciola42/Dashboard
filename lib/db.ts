@@ -424,7 +424,8 @@ export const DDL: string[] = [
   // written row (highest id) per duplicate group, matching drizzle/0007_organic_odin.sql.
   `DELETE FROM "report_pdc" a USING "report_pdc" b
     WHERE a."num_bdo" = b."num_bdo" AND a."posizione_bdo" = b."posizione_bdo" AND a."periodo_pdc" = b."periodo_pdc"
-      AND a."posizione_bdo" IS NOT NULL AND a."periodo_pdc" IS NOT NULL AND a."id" < b."id"`,
+      AND a."codice_pdc" = b."codice_pdc"
+      AND a."posizione_bdo" IS NOT NULL AND a."periodo_pdc" IS NOT NULL AND a."codice_pdc" IS NOT NULL AND a."id" < b."id"`,
   `DELETE FROM "verbali_apertura" a USING "verbali_apertura" b
     WHERE a."num_bdo" = b."num_bdo" AND a."codifica_documento" = b."codifica_documento"
       AND a."codifica_documento" IS NOT NULL AND a."id" < b."id"`,
@@ -434,7 +435,11 @@ export const DDL: string[] = [
   // l'importo di tutte le altre nel KPI "Fatturato emesso". Va rimosso anche
   // dai DB creati prima (vedi drizzle/0010_bef_drop_fattura_unique.sql).
   `DROP INDEX IF EXISTS "bef_records_numero_if_num_fattura_unique"`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS "report_pdc_num_bdo_posizione_periodo_unique" ON "report_pdc" ("num_bdo","posizione_bdo","periodo_pdc")`,
+  // Due PDC distinti (codice_pdc diversi) per la stessa posizione e lo stesso
+  // periodo sono righe legittime: la chiave naturale include il codice PDC
+  // (vedi drizzle/0014_report_pdc_codice_unique.sql).
+  `DROP INDEX IF EXISTS "report_pdc_num_bdo_posizione_periodo_unique"`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "report_pdc_num_bdo_posizione_periodo_codice_unique" ON "report_pdc" ("num_bdo","posizione_bdo","periodo_pdc","codice_pdc")`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "verbali_apertura_num_bdo_codifica_unique" ON "verbali_apertura" ("num_bdo","codifica_documento")`,
   // Domain CHECK constraints for enum-like text columns previously validated
   // only in application code (docToDb/docFromDb + role/status literals in
@@ -569,12 +574,16 @@ export const DDL: string[] = [
 //   9 — nuova tabella intervento_mesi (revenue/consuntivazione per IF, anno e
 //       mese) al posto degli array a 12 valori di un solo anno su interventi;
 //       backfill una tantum dai vecchi rev_mesi/cons_mesi (le colonne restano)
+//  10 — report_pdc: la chiave naturale diventa (num_bdo, posizione_bdo,
+//       periodo_pdc, codice_pdc). Con la chiave a tre campi due PDC distinti per
+//       la stessa posizione e lo stesso periodo facevano fallire l'intero import
+//       ("ON CONFLICT DO UPDATE command cannot affect row a second time")
 // Exported so cached payloads assembled from these tables can key off it: a
 // bootstrap that rewrites existing rows (the DATE_ID_REPAIRS above) changes what
 // a read returns without going through any app write path, so nothing calls
 // `revalidateTag`. Cache keys that include this version rebuild on the bump
 // instead of serving data assembled before the repair — see lib/getDashboardData.ts.
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 const SCHEMA_VERSION_KEY = 'schema_version';
 
 // Anything that can run a raw SQL statement: the neon-http drizzle client in

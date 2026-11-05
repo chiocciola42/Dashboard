@@ -283,6 +283,25 @@ describe.each(['memory', 'database'] as const)('%s backend', (backend) => {
       expect(rows.every((r) => r.stato_pdc === 'Chiusa')).toBe(true);
     });
 
+    it('REGRESSION: two PDC (different codice) for the same position and period are both kept', async () => {
+      const upload = [
+        pdcRec({ num_bdo: 'B1', posizione_bdo: '1', periodo_pdc: '05/2026', codice_pdc: '202611760' }),
+        pdcRec({ num_bdo: 'B1', posizione_bdo: '1', periodo_pdc: '05/2026', codice_pdc: '202612521' }),
+      ];
+      expect(await persistReportPdcFromUpload(upload, known)).toEqual({ saved: 2, ignored: 0 });
+      await persistReportPdcFromUpload(upload, known);
+      expect((await listPdcByBdo('B1')).map((r) => r.codice_pdc).sort()).toEqual(['202611760', '202612521']);
+    });
+
+    it('REGRESSION: a repeated full key inside one upload collapses to one row instead of failing the import', async () => {
+      const dup = pdcRec({ num_bdo: 'B1', posizione_bdo: '1', periodo_pdc: '05/2026', codice_pdc: '7' });
+      const res = await persistReportPdcFromUpload([dup, { ...dup, stato_pdc: 'Chiusa' }, pdcRec({ num_bdo: 'B2' })], known);
+      expect(res.saved).toBe(2);
+      const rows = await listPdcByBdo('B1');
+      expect(rows).toHaveLength(1);
+      expect(rows[0].stato_pdc).toBe('Chiusa');
+    });
+
     it('drops periods that are no longer in the new upload for that BDO, keeping other BDOs', async () => {
       await persistReportPdcFromUpload(
         [pdcRec({ num_bdo: 'B1', periodo_pdc: '2026-01' }), pdcRec({ num_bdo: 'B1', periodo_pdc: '2026-02' }), pdcRec({ num_bdo: 'B2', periodo_pdc: '2026-01' })],

@@ -3,7 +3,7 @@ import { report_pdc } from './schema';
 import type { ReportPdcRecord } from './types';
 
 // Snapshot of the "REPORT Pdc" export. Natural key (num_bdo, posizione_bdo,
-// periodo_pdc) — see the unique index in lib/schema.ts. Rows missing
+// periodo_pdc, codice_pdc) — see the unique index in lib/schema.ts. Rows missing
 // posizione_bdo or periodo_pdc aren't deduplicable and are always fully
 // replaced for their num_bdo instead of being matched by key.
 // DB-backed with an in-memory fallback. See lib/dualModeStore.ts for the
@@ -13,8 +13,8 @@ const store = createSnapshotStore<typeof report_pdc, ReportPdcRecord>({
   memGlobalKey: '__ARIA_REPORT_PDC__',
   scopeColumn: report_pdc.num_bdo,
   getScopeValue: (r) => r.num_bdo,
-  extraKeyColumns: [report_pdc.posizione_bdo, report_pdc.periodo_pdc],
-  getExtraKeyValues: (r) => [r.posizione_bdo, r.periodo_pdc],
+  extraKeyColumns: [report_pdc.posizione_bdo, report_pdc.periodo_pdc, report_pdc.codice_pdc],
+  getExtraKeyValues: (r) => [r.posizione_bdo, r.periodo_pdc, r.codice_pdc],
   numericColumns: ['importo_posizione', 'costo_subappalto'],
 });
 

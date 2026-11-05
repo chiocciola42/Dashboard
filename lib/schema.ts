@@ -291,10 +291,13 @@ export const report_pdc = pgTable(
     updated_at: timestamp('updated_at').defaultNow(),
   },
   (t) => ({
-    num_bdo_posizione_periodo_unique: uniqueIndex('report_pdc_num_bdo_posizione_periodo_unique').on(
+    // Più PDC (codice_pdc diversi) possono coprire la stessa posizione BDO e lo
+    // stesso periodo: il codice PDC fa parte della chiave naturale.
+    num_bdo_posizione_periodo_codice_unique: uniqueIndex('report_pdc_num_bdo_posizione_periodo_codice_unique').on(
       t.num_bdo,
       t.posizione_bdo,
       t.periodo_pdc,
+      t.codice_pdc,
     ),
   }),
 );
