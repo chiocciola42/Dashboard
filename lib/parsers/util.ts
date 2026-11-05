@@ -7,7 +7,34 @@ export function readWorkbook(buf: ArrayBuffer | Buffer | Uint8Array): Workbook {
   // Normalize to a byte array and read with type 'array' so the same code path
   // works both server-side (Buffer) and in the browser (ArrayBuffer/Uint8Array).
   const data = buf instanceof Uint8Array ? buf : new Uint8Array(buf as ArrayBuffer);
-  return XLSX.read(data, { type: 'array', cellDates: true });
+  const wb = XLSX.read(data, { type: 'array', cellDates: true });
+  for (const name of wb.SheetNames) widenToCells(wb.Sheets[name]);
+  return wb;
+}
+
+// Alcuni export (es. i report SAL / PDC / BEF dei sistemi sorgente) scrivono un
+// `<dimension ref="A1:V1"/>` che copre la sola riga d'intestazione anche quando
+// il foglio contiene migliaia di righe. xlsx si fida di quel range e
+// `sheet_to_json` restituirebbe la sola intestazione: l'import risulterebbe
+// "riuscito" con 0 righe. Il range viene quindi esteso a tutte le celle
+// effettivamente presenti (mai ristretto).
+function widenToCells(ws: XLSX.WorkSheet | undefined): void {
+  if (!ws) return;
+  let maxR = -1;
+  let maxC = -1;
+  for (const key in ws) {
+    if (key.charCodeAt(0) === 33 /* '!' */) continue;
+    const { r, c } = XLSX.utils.decode_cell(key);
+    if (r > maxR) maxR = r;
+    if (c > maxC) maxC = c;
+  }
+  if (maxR < 0) return;
+  const cur = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : null;
+  if (cur && cur.e.r >= maxR && cur.e.c >= maxC) return;
+  const next = cur ?? { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
+  next.e.r = Math.max(next.e.r, maxR);
+  next.e.c = Math.max(next.e.c, maxC);
+  ws['!ref'] = XLSX.utils.encode_range(next);
 }
 
 // Read a sheet as an array of row-objects keyed by the header row.
