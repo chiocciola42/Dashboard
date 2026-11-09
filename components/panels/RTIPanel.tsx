@@ -1,16 +1,16 @@
 'use client';
 import React from 'react';
 import type { Intervento, RtiConfig, Meta } from '@/lib/types';
-import { EURM, PCT } from '@/lib/format';
+import { EURM, PCT, C } from '@/lib/format';
+import { legchips } from '@/lib/charts';
 import { computeRtiErosion } from '@/lib/rtiErosion';
 import { Html } from '../Html';
 import { ChartCard } from '../export/ExportControls';
 import RtiConfigForm from './rti/RtiConfigForm';
 import RtiSummaryTable from './rti/RtiSummaryTable';
 import {
-  buildDonutHtml,
-  buildPartnerBarsHtml,
-  buildEroAnnoHtml,
+  buildRtiBulletsHtml,
+  buildRtiSummaryLine,
   buildEroTotalPctHtml,
   buildEroTotalEurHtml,
   buildEroQuotaPctHtml,
@@ -39,19 +39,18 @@ function RTIPanel({
   onUpdateRti: (u: { massimale_totale: number; quota_intellera_pct: number; quota_deloitte_pct: number }) => void;
 }) {
   const e = computeRtiErosion(IFs, rti, meta, Date.now());
-  const { ceil, years, impByYear, totImpegnato, eroTotPct, totRisk, residuo, quotaErosion, totalRealPct, totalRealEur } = e;
+  const { ceil, quotaErosion, totalRealPct, totalRealEur } = e;
   const selP = rtiSel || (filtersForn && quotaVal[filtersForn] ? filtersForn : null);
 
-  const donutHtml = buildDonutHtml(rti, quotaVal, selP);
-  const eroPartner = buildPartnerBarsHtml(rti, e.impByP);
-  const eroAnnoHtml = buildEroAnnoHtml(e, meta);
+  const bulletsHtml = buildRtiBulletsHtml(rti, e, selP);
+  const summaryLineHtml = buildRtiSummaryLine(e);
   const eroTotalPctHtml = buildEroTotalPctHtml(e);
   const eroTotalEurHtml = buildEroTotalEurHtml(e);
   const eroQuotaPctHtml = buildEroQuotaPctHtml(e);
   const eroQuotaEurHtml = buildEroQuotaEurHtml(e);
 
-  const onDonutClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const target = (e.target as HTMLElement).closest('[data-drill-rti]') as HTMLElement | null;
+  const onBulletClick = (ev: React.MouseEvent<HTMLDivElement>) => {
+    const target = (ev.target as HTMLElement).closest('[data-drill-rti]') as HTMLElement | null;
     if (target) {
       const p = target.getAttribute('data-drill-rti');
       setRtiSel(rtiSel === p ? null : p);
@@ -65,63 +64,50 @@ function RTIPanel({
         <p>Composizione del raggruppamento ed erosione del massimale e delle quote.</p>
       </div>
       {editMode && <RtiConfigForm rti={rti} onUpdate={onUpdateRti} />}
-      <div className="grid2">
-        <ChartCard
-          title="Composizione del RTI"
-          caption="Quota contrattuale per partner sul massimale contrattuale"
-          filename="Composizione_RTI"
-        >
-          <Html
-            ariaLabel={`Grafico a ciambella della composizione del RTI sul massimale ${EURM(rti.ceiling)}. ${rti.partners
-              .map((p) => `${p.name} ${PCT(p.pct * 100)} pari a ${EURM(p.quota)}`)
-              .join('; ')}.`}
-            html={donutHtml}
-            onClick={onDonutClick}
-          />
-          <div
-            style={{ textAlign: 'center', fontSize: 12, color: 'var(--muted)', marginTop: 10 }}
-            data-export-ignore
-          >
-            {selP ? (
-              <>
-                Stai vedendo la quota di <b>{selP}</b>.{' '}
-                <a
-                  href="#"
-                  style={{ color: 'var(--petrol-d)' }}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setRtiSel(null);
-                  }}
-                >
-                  ↺ mostra intero massimale
-                </a>
-              </>
-            ) : (
-              "Clic su uno spicchio per vedere l'erosione della quota di quel partner ↗"
-            )}
-          </div>
-        </ChartCard>
-        <ChartCard
-          title="Erosione della quota per partner RTI"
-          caption="Valore impegnato (IF/BO della vista) rispetto alla quota contrattuale di ciascun partner"
-          filename="Erosione_quota_partner_RTI"
-          style={{ display: 'flex', flexDirection: 'column' }}
-          bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
-        >
-          <div className="hbars-fill" style={{ flex: 1 }}>
-            <Html html={eroPartner} style={{ height: '100%', display: 'flex', flexDirection: 'column' }} />
-          </div>
-        </ChartCard>
-      </div>
       <ChartCard
-        title="Erosione per Anno"
-        caption="Impegnato (IF/BO della vista) distribuito per anno lungo la durata contrattuale"
-        filename="Erosione_per_anno"
+        title="Quanta quota hanno consumato tutte le aziende dell'RTI rispetto al tempo trascorso?"
+        caption="Impegnato (IF/BO della vista) di ciascuna azienda rispetto alla propria quota contrattuale · il segno nero è il tempo contrattuale trascorso"
+        filename="Erosione_quote_RTI"
       >
         <Html
-          ariaLabel={`Erosione del massimale contrattuale per anno. Massimale ${EURM(ceil)}, impegnato totale ${EURM(totImpegnato)} (${PCT(eroTotPct)}, ${totRisk.label}), ${residuo < 0 ? `sforamento ${EURM(-residuo)}` : `residuo ${EURM(residuo)}`}. Impegnato per anno: ${years.map((y) => `${y} ${EURM(impByYear[y] || 0)}`).join(', ')}.`}
-          html={eroAnnoHtml}
+          ariaLabel={`Composizione del massimale ${EURM(rti.ceiling)} e erosione della quota di ogni azienda dell'RTI rispetto al tempo contrattuale trascorso (${PCT(e.theoreticalTodayPct)}). ${e.summaryRows
+            .map((s) => `${s.label}: ${s.realPct != null ? `erosione ${PCT(s.realPct)}` : 'contratto non iniziato'}${s.projectedPct != null ? `, proiezione a fine contratto ${PCT(s.projectedPct)}` : ''}`)
+            .join('; ')}.`}
+          html={bulletsHtml}
+          onClick={onBulletClick}
         />
+        <Html
+          className="legrow"
+          html={legchips([
+            { c: C.petrol, t: 'Impegnato (sotto soglia)' },
+            { c: C.amberD, t: 'Attenzione ≥ 75%' },
+            { c: C.bad, t: 'Critico ≥ 90%' },
+            { c: C.ink, t: 'Tempo contrattuale trascorso', line: true },
+          ])}
+        />
+        <Html html={summaryLineHtml} />
+        <div
+          style={{ textAlign: 'center', fontSize: 12, color: 'var(--muted)', marginTop: 10 }}
+          data-export-ignore
+        >
+          {selP ? (
+            <>
+              Stai vedendo la quota di <b>{selP}</b>.{' '}
+              <a
+                href="#"
+                style={{ color: 'var(--petrol-d)' }}
+                onClick={(ev) => {
+                  ev.preventDefault();
+                  setRtiSel(null);
+                }}
+              >
+                ↺ mostra intero massimale
+              </a>
+            </>
+          ) : (
+            "Clic su un'azienda per evidenziarne la quota ↗"
+          )}
+        </div>
       </ChartCard>
       <ChartCard
         title="Erosione teorica vs reale del massimale (%)"

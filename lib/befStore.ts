@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { RunnableQuery } from 'drizzle-orm/runnable-query';
 import { getDb, hasDB, ensureSchema } from './db';
 import { bef_records } from './schema';
-import type { BefRow, BefRecord, BefMonthly, BefAggregates } from './types';
+import type { BefRow, BefRecord, BefMonthly, BefAggregates, BefFatturabile } from './types';
 import { bdoFromBef } from './codes';
 
 // Batch items for replaceBef: a mix of PgDelete and PgInsert query builders,
@@ -104,6 +104,50 @@ export function computeBefMonthlyTotals(rows: BefRow[]): BefMonthly[] {
     const [anno, mese] = key.split('-').map(Number);
     return { anno, mese, totale };
   });
+}
+
+const MESI_IT: Record<string, number> = {
+  gen: 1, feb: 2, mar: 3, apr: 4, mag: 5, giu: 6, lug: 7, ago: 8, set: 9, ott: 10, nov: 11, dic: 12,
+};
+const periodo = (anno: number, mese: number): { anno: number; mese: number } | null =>
+  anno >= 2000 && anno <= 2100 && mese >= 1 && mese <= 12 ? { anno, mese } : null;
+
+// `periodo_competenza` è testo libero. Formati letti: "2026-03" (anche con giorno/ora),
+// "03/2026" e "marzo 2026" / "mar 2026". Qualsiasi altra cosa → null (mai un mese inventato).
+export function parsePeriodoCompetenza(raw: string | null | undefined): { anno: number; mese: number } | null {
+  const s = (raw ?? '').trim().toLowerCase();
+  if (!s) return null;
+  const iso = /^(\d{4})[-/.](\d{1,2})(?:[-/.]\d{1,2})?(?:[t ].*)?$/.exec(s);
+  if (iso) return periodo(Number(iso[1]), Number(iso[2]));
+  const it = /^(\d{1,2})[-/.](\d{4})$/.exec(s);
+  if (it) return periodo(Number(it[2]), Number(it[1]));
+  const name = /^([a-zà]{3,9})\.?\s+(\d{4})$/.exec(s);
+  if (name && MESI_IT[name[1].slice(0, 3)]) return periodo(Number(name[2]), MESI_IT[name[1].slice(0, 3)]);
+  return null;
+}
+
+// Fatturabile reale: somma di `importo_ricezione` per mese di `periodo_competenza`, su TUTTE le
+// righe (da emettere, in attesa, emesse): è ciò che è diventato fatturabile in quel mese. Le righe
+// senza periodo leggibile sono contate in `senzaPeriodo`. Le righe senza importo non contano.
+export function computeBefFatturabileMonthly(rows: BefRow[]): BefFatturabile {
+  const totals = new Map<string, number>();
+  const senzaPeriodo = { n: 0, totale: 0 };
+  for (const r of rows) {
+    if (r.importo_ricezione == null) continue;
+    const p = parsePeriodoCompetenza(r.periodo_competenza);
+    if (!p) {
+      senzaPeriodo.n += 1;
+      senzaPeriodo.totale += r.importo_ricezione;
+      continue;
+    }
+    const key = `${p.anno}-${p.mese}`;
+    totals.set(key, (totals.get(key) ?? 0) + r.importo_ricezione);
+  }
+  const monthly = [...totals.entries()].map(([key, totale]) => {
+    const [anno, mese] = key.split('-').map(Number);
+    return { anno, mese, totale };
+  });
+  return { monthly, senzaPeriodo };
 }
 
 export async function getBefMonthlyTotals(): Promise<BefMonthly[]> {

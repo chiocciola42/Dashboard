@@ -1,8 +1,9 @@
 'use client';
 import React from 'react';
 import type { Intervento } from '@/lib/types';
-import { EUR, EUR0, PCT, C } from '@/lib/format';
-import { donut } from '@/lib/charts';
+import { EUR, EUR0, PCT } from '@/lib/format';
+import { chartFunnel, funnelFromStats } from '@/lib/chartsInsight';
+import { funnelStats } from '@/lib/stato';
 import { Html } from '../Html';
 import { ChartCard, CopyTableButton } from '../export/ExportControls';
 
@@ -17,24 +18,8 @@ function StatoPanel({
   const senzaBo = IFs.filter((i) => !i.has_bo);
   const pct = IFs.length ? Math.round((conBo.length / IFs.length) * 100) : 0;
 
-  const stAgg: Record<string, number> = {};
-  IFs.forEach((i) => (stAgg[i.stato] = (stAgg[i.stato] || 0) + 1));
-  const stcol: Record<string, string> = { approvato: C.good, 'non elaborato': C.gold };
-  const stE = Object.entries(stAgg).sort((a, b) => b[1] - a[1]);
-
-  const stBox = IFs.length
-    ? donut(
-        stE.map((e) => ({
-          label: `${e[0]} · ${e[1]} IF`,
-          v: e[1],
-          c: stcol[e[0]] || C.slateL,
-          drillStato: e[0],
-          tip: `${e[0]}\n${e[1]} IF · clic per vederle`,
-        })),
-        IFs.length,
-        'IF attive',
-      )
-    : '<div class="empty">Nessun IF</div>';
+  const steps = funnelFromStats(funnelStats(IFs));
+  const stBox = chartFunnel(steps);
 
   const subIFs = IFs.filter((i) => i.subappalto);
   const onDrill = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -50,19 +35,17 @@ function StatoPanel({
       </div>
       <div className="grid2">
         <ChartCard
-          title="IF per stato del BO"
+          title="Dove si fermano gli IF prima di diventare fatturabili?"
           caption={`${IFs.length} IF · ${conBo.length} con BO · ${senzaBo.length} in attesa`}
           filename="IF_per_stato_BO"
         >
           <Html
-            ariaLabel={`Grafico a ciambella degli IF per stato del Buono d'Ordine. ${IFs.length} IF totali: ${conBo.length} con BO emesso, ${senzaBo.length} in attesa. Per stato: ${stE
-              .map((e) => `${e[0]} ${e[1]} IF`)
-              .join(', ')}.`}
+            ariaLabel={`Imbuto degli IF verso la fatturabilità. ${steps.map((s) => `${s.label} ${s.n} IF, ${EUR(s.v)}`).join('; ')}. In attesa di Buono d'Ordine: ${senzaBo.length} IF.`}
             html={stBox}
             onClick={onDrill}
           />
           <div style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 12, marginTop: 8 }} data-export-ignore>
-            Clic su una fetta per vedere gli IF ↗
+            Clic sul passo «Approvati» per vedere gli IF ↗
           </div>
           <div className="exsum" style={{ marginTop: 16 }}>
             {(
@@ -70,7 +53,7 @@ function StatoPanel({
                 ['IF totali', IFs.length, ' '],
                 ['BO emessi', conBo.length, PCT(pct)],
                 ['In attesa', senzaBo.length, ' '],
-                ['Approvati', stAgg['approvato'] || 0, ' '],
+                ['Approvati', steps[1].n, ' '],
               ] as [string, number, string][]
             ).map((s, i) => (
               <div className="stat" key={i}>

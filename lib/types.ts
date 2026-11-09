@@ -115,6 +115,15 @@ export type BefMonthly = {
   totale: number;
 };
 
+// "Fatturabile reale": importi BEF (`importo_ricezione`) collocati nel mese del
+// `periodo_competenza`, qualunque sia lo stato della fattura. Le righe il cui
+// periodo non è leggibile non hanno un mese: restano fuori dalla serie e sono
+// contate a parte, così il grafico può dichiararlo.
+export type BefFatturabile = {
+  monthly: BefMonthly[];
+  senzaPeriodo: { n: number; totale: number };
+};
+
 // Portfolio-level totals of `bef_records.importo_ricezione` (no period filter).
 // `fatturabile` + `fatturatoInAttesa` + `fatturatoEmesso` sono mutuamente
 // esclusive ed esaustive (ogni riga BEF ricade in una e una sola); `fatturatoIncassato`
@@ -317,6 +326,7 @@ export type DashboardData = {
   timeline: Timeline;
   timeline_my: MultiYearTimeline;
   bef_monthly: BefMonthly[];
+  bef_fatturabile: BefFatturabile;
   bef_aggregates: BefAggregates;
   kpi: Kpi;
   revenue_mensile: { mese: string; intellera: number; deloitte: number }[];

@@ -1,5 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { computeBefAggregates, computeBefMonthlyTotals, listAllBef, listBef, persistBefFromUpload, replaceBef } from '@/lib/befStore';
+import {
+  computeBefAggregates,
+  computeBefFatturabileMonthly,
+  computeBefMonthlyTotals,
+  listAllBef,
+  listBef,
+  parsePeriodoCompetenza,
+  persistBefFromUpload,
+  replaceBef,
+} from '@/lib/befStore';
 import { bdoFromBef, isBdoCode, isBefCode, isIfCode } from '@/lib/codes';
 import type { BefRecord, BefRow } from '@/lib/types';
 
@@ -170,5 +179,58 @@ describe('ARIA code rules', () => {
     expect(bdoFromBef('2604-9999999999-123456')).toBe('9999999999');
     expect(bdoFromBef('123')).toBeNull();
     expect(bdoFromBef(null)).toBeNull();
+  });
+});
+
+describe('parsePeriodoCompetenza', () => {
+  it('reads the formats found in the BEF exports', () => {
+    expect(parsePeriodoCompetenza('2026-03')).toEqual({ anno: 2026, mese: 3 });
+    expect(parsePeriodoCompetenza('2026-03-31')).toEqual({ anno: 2026, mese: 3 });
+    expect(parsePeriodoCompetenza('2026-03-31T00:00:00')).toEqual({ anno: 2026, mese: 3 });
+    expect(parsePeriodoCompetenza('2026/3')).toEqual({ anno: 2026, mese: 3 });
+    expect(parsePeriodoCompetenza('03/2026')).toEqual({ anno: 2026, mese: 3 });
+    expect(parsePeriodoCompetenza('3-2026')).toEqual({ anno: 2026, mese: 3 });
+    expect(parsePeriodoCompetenza(' Marzo 2026 ')).toEqual({ anno: 2026, mese: 3 });
+    expect(parsePeriodoCompetenza('mar. 2026')).toEqual({ anno: 2026, mese: 3 });
+    expect(parsePeriodoCompetenza('Dicembre 2025')).toEqual({ anno: 2025, mese: 12 });
+  });
+
+  it('never invents a month: anything unreadable or out of range is null', () => {
+    for (const v of [null, undefined, '', '   ', 'P-1', '2026', '13/2026', '2026-13', '00/2026', '1999-05', '2101-01', 'boh 2026', 'Q1 2026']) {
+      expect(parsePeriodoCompetenza(v as never), String(v)).toBeNull();
+    }
+  });
+});
+
+describe('computeBefFatturabileMonthly — fatturabile reale per periodo di competenza', () => {
+  it('collocates EVERY row in the month of its competence, whatever the invoice status', () => {
+    const r = computeBefFatturabileMonthly([
+      row({ importo_ricezione: 100, periodo_competenza: '2026-01' }), // da emettere
+      row({ importo_ricezione: 200, periodo_competenza: '01/2026', num_fattura: 'F1' }), // in attesa
+      row({ importo_ricezione: 300, periodo_competenza: '2026-02', num_fattura: 'F2', data_fattura: '2026-04-10' }), // emessa in un altro mese
+    ]);
+    const m = new Map(r.monthly.map((x) => [`${x.anno}-${x.mese}`, x.totale]));
+    expect(m.get('2026-1')).toBe(300);
+    expect(m.get('2026-2')).toBe(300);
+    expect(r.monthly).toHaveLength(2);
+    expect(r.senzaPeriodo).toEqual({ n: 0, totale: 0 });
+  });
+
+  it('counts rows without a readable period aside and ignores rows without amount', () => {
+    const r = computeBefFatturabileMonthly([
+      row({ importo_ricezione: 50, periodo_competenza: null }),
+      row({ importo_ricezione: 25, periodo_competenza: 'boh' }),
+      row({ importo_ricezione: null, periodo_competenza: null }),
+      row({ importo_ricezione: 10, periodo_competenza: '2026-05' }),
+    ]);
+    expect(r.senzaPeriodo).toEqual({ n: 2, totale: 75 });
+    expect(r.monthly).toEqual([{ anno: 2026, mese: 5, totale: 10 }]);
+  });
+
+  it('the readable total plus the rest equals the whole BEF amount; no rows gives empty results', () => {
+    const rows = [row({ importo_ricezione: 5, periodo_competenza: '2026-01' }), row({ importo_ricezione: 7, periodo_competenza: null })];
+    const r = computeBefFatturabileMonthly(rows);
+    expect(r.monthly.reduce((s, x) => s + x.totale, 0) + r.senzaPeriodo.totale).toBe(12);
+    expect(computeBefFatturabileMonthly([])).toEqual({ monthly: [], senzaPeriodo: { n: 0, totale: 0 } });
   });
 });

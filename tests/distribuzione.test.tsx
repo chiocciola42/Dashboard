@@ -3,7 +3,7 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import DistribuzionePanel from '@/components/panels/DistribuzionePanel';
-import { buildAmbCount, buildAmbVal, buildRefStack, buildSenDonut, PAL } from '@/components/panels/distribuzione/distribuzioneHtml';
+import { buildAmbPareto, buildRefShares, buildSenBars } from '@/components/panels/distribuzione/distribuzioneHtml';
 import {
   NON_CLASSIFICATO,
   NO_REFERENTE,
@@ -13,7 +13,7 @@ import {
   totalGg,
   totalImporto,
 } from '@/lib/distribuzione';
-import type { Seniority } from '@/lib/types';
+import type { RtiPartner, Seniority } from '@/lib/types';
 import { makeIf } from './helpers/fixtures';
 
 afterEach(cleanup);
@@ -24,6 +24,11 @@ const IFs = [
   makeIf({ numero_if: '3', ambito: null, ref_aria: null, fornitore: 'Altro', importo: 70 }),
   makeIf({ numero_if: '4', ambito: 'Cloud', ref_aria: 'Bianchi', fornitore: 'Intellera', importo: 2000 }),
 ];
+const partners: RtiPartner[] = [
+  { name: 'Intellera', pct: 0.65, quota: 6500, impegnato: 0 },
+  { name: 'Deloitte', pct: 0.35, quota: 3500, impegnato: 0 },
+];
+const names = partners.map((p) => p.name);
 const sen: Seniority[] = [
   { figura: 'Senior Dev', code: 'SD', gg: 1200, tariffa: 450.5 },
   { figura: 'Junior Dev', code: 'JD', gg: 30, tariffa: null },
@@ -45,15 +50,30 @@ describe('aggregateByAmbito', () => {
 });
 
 describe('aggregateByReferente', () => {
-  it('splits each referent by supplier, biggest total first, blank referent bucketed', () => {
-    const r = aggregateByReferente(IFs);
+  it('splits each referent by RTI company, biggest total first, blank referent bucketed', () => {
+    const r = aggregateByReferente(IFs, names);
     expect(r.map(([k]) => k)).toEqual(['Bianchi', 'Rossi', NO_REFERENTE]);
-    expect(r[1][1]).toEqual({ Intellera: 1000, Deloitte: 500, Altro: 0, n: 2, tot: 1500 });
-    expect(r[2][1]).toEqual({ Intellera: 0, Deloitte: 0, Altro: 70, n: 1, tot: 70 });
+    expect(r[1][1]).toEqual({ byPartner: { Intellera: 1000, Deloitte: 500 }, fuoriRti: 0, n: 2, tot: 1500 });
+    expect(r[2][1]).toEqual({ byPartner: { Intellera: 0, Deloitte: 0 }, fuoriRti: 70, n: 1, tot: 70 });
   });
 
-  it('total equals the sum of the three supplier columns', () => {
-    for (const [, o] of aggregateByReferente(IFs)) expect(o.tot).toBe(o.Intellera + o.Deloitte + o.Altro);
+  it('total equals the sum of every RTI company plus the suppliers outside the RTI', () => {
+    for (const [, o] of aggregateByReferente(IFs, names)) {
+      expect(o.tot).toBe(Object.values(o.byPartner).reduce((s, v) => s + v, 0) + o.fuoriRti);
+    }
+  });
+
+  it('REGRESSION: every configured RTI company gets its own column, not only Intellera and Deloitte', () => {
+    const five = ['Intellera', 'Deloitte', 'Gellify', 'PGMD', 'Accenture'];
+    const ifs = five.map((f, i) => makeIf({ numero_if: `g${i}`, ref_aria: 'Rossi', fornitore: f, importo: 100 * (i + 1) }));
+    const [[, o]] = aggregateByReferente(ifs, five);
+    expect(o.byPartner).toEqual({ Intellera: 100, Deloitte: 200, Gellify: 300, PGMD: 400, Accenture: 500 });
+    expect(o.fuoriRti).toBe(0);
+  });
+
+  it('no partners configured: everything is outside the RTI; no IF: no rows', () => {
+    expect(aggregateByReferente(IFs, [])[0][1].fuoriRti).toBe(2000);
+    expect(aggregateByReferente([], names)).toEqual([]);
   });
 });
 
@@ -75,35 +95,29 @@ describe('totals and formatting', () => {
 
 describe('chart builders', () => {
   it('empty states', () => {
-    expect(buildAmbCount([])).toContain('Nessun IF in questa vista');
-    expect(buildAmbVal([])).toContain('Nessun IF');
-    expect(buildRefStack([])).toContain('Nessun IF');
-    expect(buildSenDonut([])).toContain('Nessun dato');
+    expect(buildAmbPareto([])).toContain('Nessun dato');
+    expect(buildRefShares([], partners)).toContain('Nessun IF');
+    expect(buildSenBars([])).toContain('Nessun dato');
   });
 
-  it('long labels are truncated with an ellipsis', () => {
+  it('long ambito labels are truncated with an ellipsis; the tooltip keeps the full name', () => {
     const long = 'X'.repeat(60);
-    const html = buildAmbCount([[long, { v: 1, n: 1 }]]);
-    // visible label is cut to 34 chars (33 + ellipsis); the tooltip keeps the full name
-    expect(html).toContain('>' + 'X'.repeat(33) + '…</div>');
+    const html = buildAmbPareto([[long, { v: 1, n: 1 }]]);
+    expect(html).toContain('>' + 'X'.repeat(29) + '…</text>');
     expect(html).toContain('data-tip="' + long);
   });
 
-  it('seniority donut cycles the palette when there are more figures than colors', () => {
-    const many = Array.from({ length: PAL.length + 3 }, (_, i) => ({ figura: `F${i}`, code: `C${i}`, gg: i + 1, tariffa: null }));
-    expect(() => buildSenDonut(many)).not.toThrow();
-    expect(buildSenDonut(many)).toContain(PAL[0]);
-  });
-
-  it('seniority tooltip shows the tariff only when there is one', () => {
-    const html = buildSenDonut(sen);
-    expect(html).toContain('450,50');
+  it('seniority bars show the tariff and the cost only when there is a tariff', () => {
+    const html = buildSenBars(sen);
+    expect(html).toContain('450');
+    const noTariff = buildSenBars([{ figura: 'Jr', code: 'J', gg: 10, tariffa: null }]);
+    expect(noTariff).not.toContain('Costo €');
   });
 });
 
 describe('DistribuzionePanel', () => {
   const mount = (distSub = 0, setDistSub = vi.fn(), ifs = IFs, seniority = sen) =>
-    render(<DistribuzionePanel IFs={ifs} seniority={seniority} distSub={distSub} setDistSub={setDistSub} />);
+    render(<DistribuzionePanel IFs={ifs} seniority={seniority} distSub={distSub} setDistSub={setDistSub} partners={partners} />);
 
   it('marks only the selected sub-panel and sub-tab as active', () => {
     for (const sub of [0, 1, 2]) {
@@ -148,8 +162,9 @@ describe('DistribuzionePanel', () => {
     const bianchi = rows[0].querySelectorAll('td');
     expect(bianchi[0].textContent).toBe('Bianchi');
     expect(bianchi[2].textContent).toBe('—'); // no Deloitte value
-    expect(bianchi[3].querySelector('b')).not.toBeNull();
-    expect(bianchi[4].textContent).toBe('1');
+    expect(bianchi[3].textContent).toBe('—'); // no supplier outside the RTI
+    expect(bianchi[4].querySelector('b')).not.toBeNull();
+    expect(bianchi[5].textContent).toBe('1');
   });
 
   it('seniority table lists every figure with its tariff or a dash', () => {

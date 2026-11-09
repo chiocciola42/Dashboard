@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import type { Intervento, Seniority } from '@/lib/types';
+import type { Intervento, RtiPartner, Seniority } from '@/lib/types';
 import { aggregateByAmbito, aggregateByReferente, totalImporto } from '@/lib/distribuzione';
 import AmbitoTab from './distribuzione/AmbitoTab';
 import ReferenteTab from './distribuzione/ReferenteTab';
@@ -11,17 +11,19 @@ const SUBTABS = ['4a — Per Ambito', '4b — Per Referente ARIA', '4c — Per S
 function DistribuzionePanel({
   IFs,
   seniority,
+  partners,
   distSub,
   setDistSub,
 }: {
   IFs: Intervento[];
   seniority: Seniority[];
+  partners: RtiPartner[];
   distSub: number;
   setDistSub: (n: number) => void;
 }) {
   const tot = totalImporto(IFs);
   const ae = aggregateByAmbito(IFs);
-  const re = aggregateByReferente(IFs);
+  const re = aggregateByReferente(IFs, partners.map((p) => p.name));
 
   return (
     <div className="panel on" data-p="3">
@@ -38,7 +40,7 @@ function DistribuzionePanel({
       </div>
 
       <AmbitoTab ae={ae} tot={tot} active={distSub === 0} />
-      <ReferenteTab re={re} active={distSub === 1} />
+      <ReferenteTab re={re} partners={partners} active={distSub === 1} />
       <SeniorityTab seniority={seniority} active={distSub === 2} />
     </div>
   );

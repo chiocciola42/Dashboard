@@ -1,59 +1,6 @@
 import { EUR, EURM, PCT, C } from '@/lib/format';
 import { esc } from '@/lib/charts';
 
-export function buildYearlyErosionChart(
-  years: number[],
-  impByYear: Record<number, number>,
-  annualQuota: number,
-  todayYear: number,
-): string {
-  const W = 920, H = 260, pl = 76, pr = 18, pt = 20, pb = 44;
-  const pw = W - pl - pr, ph = H - pt - pb;
-  const maxV = Math.max(annualQuota * 1.25, ...Object.values(impByYear), 1);
-  const ticks = 4;
-  const yOf = (v: number) => pt + ph - (v / maxV) * ph;
-  const slot = pw / years.length;
-  const bw = Math.min(slot * 0.5, 80);
-
-  let g = '';
-  for (let i = 0; i <= ticks; i++) {
-    const v = (maxV * i) / ticks, y = yOf(v);
-    g += `<line x1="${pl}" y1="${y.toFixed(1)}" x2="${W - pr}" y2="${y.toFixed(1)}" stroke="${C.line}"/>`;
-    g += `<text x="${pl - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="11.5" fill="${C.muted}">€${(v / 1e6).toFixed(1)}M</text>`;
-  }
-
-  // annual quota reference line
-  const qy = yOf(annualQuota);
-  g += `<line x1="${pl}" y1="${qy.toFixed(1)}" x2="${(W - pr).toFixed(1)}" y2="${qy.toFixed(1)}" stroke="${C.amberD}" stroke-width="1.5" stroke-dasharray="6 4"/>`;
-  g += `<text x="${(W - pr - 4).toFixed(1)}" y="${(qy - 5).toFixed(1)}" text-anchor="end" font-size="10" fill="${C.amberD}">budget/anno</text>`;
-
-  let bars = '', labs = '';
-  years.forEach((yr, i) => {
-    const cx = pl + slot * i + slot / 2;
-    const v = impByYear[yr] || 0;
-    const y = yOf(v);
-    const isPast = yr < todayYear;
-    const isToday = yr === todayYear;
-    const col = isToday ? C.petrol : isPast ? C.petrolD : C.petrolL;
-    bars += `<rect x="${(cx - bw / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${(pt + ph - y).toFixed(1)}" rx="4" fill="${col}" class="seg" data-tip="${esc(`${yr}\nImpegnato: ${EUR(v)}\nBudget annuo: ${EUR(annualQuota)}`)}"/>`;
-    if (v > 0) {
-      bars += `<text x="${cx.toFixed(1)}" y="${(y - 7).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="700" fill="${C.ink}">${(v / 1e6).toFixed(1)}M</text>`;
-    }
-    labs += `<text x="${cx.toFixed(1)}" y="${H - pb + 18}" text-anchor="middle" font-size="13" font-weight="${isToday ? '700' : '400'}" fill="${isToday ? C.ink : C.muted}">${yr}</text>`;
-  });
-
-  // today marker
-  let mk = '';
-  const todayIdx = years.indexOf(todayYear);
-  if (todayIdx >= 0) {
-    const mx = pl + slot * todayIdx + slot / 2;
-    mk = `<line x1="${mx.toFixed(1)}" y1="${pt}" x2="${mx.toFixed(1)}" y2="${pt + ph}" stroke="${C.amberD}" stroke-width="1.3" stroke-dasharray="4 3"/>`;
-    mk += `<text x="${(mx + 5).toFixed(1)}" y="${pt + 13}" text-anchor="start" font-size="10" fill="${C.amberD}" font-weight="700">oggi</text>`;
-  }
-
-  return `<svg class="msvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${g}${bars}${mk}${labs}</svg>`;
-}
-
 export type ProjectionSeries = {
   name: string;
   color: string;

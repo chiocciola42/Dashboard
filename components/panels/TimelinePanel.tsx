@@ -1,6 +1,6 @@
 'use client';
 import React, { useMemo, useState } from 'react';
-import type { MultiYearTimeline, BefMonthly, BefAggregates } from '@/lib/types';
+import type { MultiYearTimeline, BefMonthly, BefAggregates, BefFatturabile } from '@/lib/types';
 import { EUR, EUR2, PCT, C } from '@/lib/format';
 import {
   type Calendar,
@@ -11,19 +11,22 @@ import {
   yearSeriesQuarterlyMap,
   todayIndex,
 } from '@/lib/fiscal';
-import { chartRevFatt, legchips } from '@/lib/charts';
+import { legchips } from '@/lib/charts';
+import { chartBillingGap, hasBillableSeries } from '@/lib/chartsInsight';
 import { Html } from '../Html';
 import { ChartCard, CopyTableButton } from '../export/ExportControls';
 
 function TimelinePanel({
   timelineMy,
   befMonthly,
+  befFatturabile,
   befAggregates,
   tlMode,
   setTlMode,
 }: {
   timelineMy: MultiYearTimeline;
   befMonthly: BefMonthly[];
+  befFatturabile: BefFatturabile;
   befAggregates: BefAggregates;
   tlMode: 'mese' | 'trim';
   setTlMode: (m: 'mese' | 'trim') => void;
@@ -34,6 +37,12 @@ function TimelinePanel({
     for (const r of befMonthly) m.set(`${r.anno}-${r.mese}`, r.totale);
     return m;
   }, [befMonthly]);
+  // Fatturabile reale: BEF collocato nel mese del periodo di competenza (stessa chiave anno-mese).
+  const fabMap = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of befFatturabile.monthly) m.set(`${r.anno}-${r.mese}`, r.totale);
+    return m;
+  }, [befFatturabile]);
   const [cal, setCal] = useState<Calendar>('solare');
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -70,10 +79,17 @@ function TimelinePanel({
     tlMode === 'trim'
       ? yearSeriesQuarterlyMap(befMap, effYear, cal)
       : yearSeriesMonthlyMap(befMap, effYear, cal);
+  const fabB =
+    tlMode === 'trim'
+      ? yearSeriesQuarterlyMap(fabMap, effYear, cal)
+      : yearSeriesMonthlyMap(fabMap, effYear, cal);
   const labels = revB.map((b) => b.label);
   const rev = revB.map((b) => b.value);
   const fatt = fattB.map((b) => b.value);
   const bef = befB.map((b) => b.value);
+  const fab = fabB.map((b) => b.value);
+  const hasFab = hasBillableSeries(fab);
+  const noPeriod = befFatturabile.senzaPeriodo;
 
   const monthToday = todayIndex(effYear, cal);
   const today =
@@ -87,6 +103,7 @@ function TimelinePanel({
   const upto = today < 0 ? 0 : today + 1;
   const matR = rev.slice(0, upto).reduce((x, y) => x + y, 0);
   const modeTxt = tlMode === 'trim' ? 'trimestrale' : 'mensile';
+  const billedName = hasBef ? 'Fatturato emesso (BEF)' : 'Fatturazione';
   const calTxt = cal === 'solare' ? 'anno solare' : 'anno fiscale';
 
   const stats: [string, string, string][] = [
@@ -144,37 +161,54 @@ function TimelinePanel({
         </div>
       </div>
       <ChartCard
-        title={`Revenue vs Fatturazione — ${modeTxt} · ${calTxt} ${periodLabel}`}
+        title={`Quanto tempo passa fra revenue, fatturabile e fattura? — ${modeTxt} · ${calTxt} ${periodLabel}`}
         caption={
-          'Barre: valori per periodo · Linee: cumulati · solo fornitore Intellera Consulting' +
+          'Cumulati su un solo asse · aree = scarti fra revenue, fatturabile e fatturato · solo fornitore Intellera Consulting' +
           (hasBef ? ` · Fatturato BEF ${calTxt} ${periodLabel}: ${EUR2(totBef)}` : '')
         }
-        filename={`Revenue_vs_Fatturazione_${periodLabel}`}
+        filename={`Revenue_fatturabile_fatturato_${periodLabel}`}
       >
         <Html
-          ariaLabel={`Revenue vs fatturazione (${modeTxt}, ${calTxt} ${periodLabel}). Revenue totale ${EUR(totR)}, fatturazione totale ${EUR(totF)}${
+          ariaLabel={`Revenue cumulata${hasFab ? ', fatturabile reale' : ''} e ${billedName.toLowerCase()} cumulato (${modeTxt}, ${calTxt} ${periodLabel}). Revenue totale ${EUR(totR)}, fatturazione totale ${EUR(totF)}${
             hasBef ? `, fatturato BEF totale ${EUR(totBef)}` : ''
-          }. Per periodo: ${labels
+          }${hasFab ? `, fatturabile reale totale ${EUR(sum(fab))}` : ''}. Per periodo: ${labels
             .map(
               (l, i) =>
                 `${l} revenue ${EUR(rev[i])} fatturazione ${EUR(fatt[i])}${
                   hasBef ? ` fatturato BEF ${EUR(bef[i])}` : ''
-                }`,
+                }${hasFab ? ` fatturabile ${EUR(fab[i])}` : ''}`,
             )
             .join('; ')}.`}
-          html={chartRevFatt(labels, rev, fatt, bef, today, periodLabel)}
+          html={chartBillingGap({
+            labels,
+            revenue: rev,
+            billed: hasBef ? bef : fatt,
+            billedName,
+            billable: hasFab ? fab : null,
+            planBilled: hasBef ? fatt : undefined,
+            lastActual: today,
+            todayLabel: today >= 0 && today < labels.length - 1 ? 'oggi' : undefined,
+            periodLabel,
+            monthsPerPeriod: tlMode === 'trim' ? 3 : 1,
+          })}
         />
         <Html
           className="legrow"
           html={legchips([
-            { c: C.petrol, t: 'Revenue' },
-            { c: C.gold, t: 'Fatturazione' },
-            ...(hasBef ? [{ c: C.slate, t: 'Fatturato (BEF)' }] : []),
-            { c: C.petrolD, t: 'Cum. Revenue', line: true },
-            { c: C.amberD, t: 'Cum. Fatturazione', dash: true },
-            ...(hasBef ? [{ c: C.slate, t: 'Cum. Fatturato (BEF)', dash: true }] : []),
+            { c: C.petrol, t: 'Revenue maturata (cum.)', line: true },
+            ...(hasFab ? [{ c: C.gold, t: 'Fatturabile reale · BEF per periodo di competenza (cum.)', line: true }] : []),
+            { c: C.amberD, t: `${billedName}${hasBef ? ' · per data fattura' : ''} (cum.)`, line: true },
+            ...(hasBef && !hasFab ? [{ c: C.slate, t: 'Fatturazione a piano (cum.)', dash: true }] : []),
+            ...(hasFab ? [{ c: C.petrol, t: 'Non ancora fatturabile' }] : []),
+            { c: C.gold, t: hasFab ? 'Fatturabile non fatturato' : 'Da fatturare' },
           ])}
         />
+        {noPeriod.n > 0 && (
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
+            {noPeriod.n} {noPeriod.n === 1 ? 'riga BEF' : 'righe BEF'} ({EUR(noPeriod.totale)}) senza periodo di competenza
+            leggibile non {noPeriod.n === 1 ? 'compare' : 'compaiono'} nella linea del fatturabile.
+          </div>
+        )}
       </ChartCard>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 22 }}>
         <CopyTableButton

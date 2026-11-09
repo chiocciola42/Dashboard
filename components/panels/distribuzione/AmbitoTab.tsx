@@ -4,31 +4,26 @@ import { EUR0, PCT } from '@/lib/format';
 import type { AmbitoAgg } from '@/lib/distribuzione';
 import { Html } from '../../Html';
 import { ChartCard, CopyTableButton } from '../../export/ExportControls';
-import { buildAmbCount, buildAmbVal } from './distribuzioneHtml';
+import { buildAmbPareto } from './distribuzioneHtml';
 
 // 4a — per ambito.
 export default function AmbitoTab({ ae, tot, active }: { ae: [string, AmbitoAgg][]; tot: number; active: boolean }) {
   const ambTblRef = useRef<HTMLDivElement>(null);
-  const ambCount = buildAmbCount(ae);
-  const ambVal = buildAmbVal(ae);
+  const ambPareto = buildAmbPareto(ae);
   return (
   <div className={'subpanel' + (active ? ' on' : '')}>
-    <div className="grid2">
-      <ChartCard
-        title="N° IF per ambito"
-        caption="Numero di Interventi di Fornitura per macro ambito"
-        filename="IF_per_ambito"
-      >
-        <Html html={ambCount} />
-      </ChartCard>
-      <ChartCard
-        title="Valore (€) per ambito"
-        caption="Valore ordinato per macro ambito"
-        filename="Valore_per_ambito"
-      >
-        <Html html={ambVal} />
-      </ChartCard>
-    </div>
+    <ChartCard
+      title="Quali ambiti concentrano il valore?"
+      caption="Valore per ambito, numero di IF (un punto = un IF) e quota cumulata"
+      filename="Valore_per_ambito"
+    >
+      <Html
+        ariaLabel={`Valore per ambito in ordine decrescente. ${ae
+          .map(([k, o]) => `${k}: ${EUR0(o.v)} euro, ${o.n} IF`)
+          .join('; ')}.`}
+        html={ambPareto}
+      />
+    </ChartCard>
     <div className="tablecard">
       <div className="tbar">
         <h3>Dettaglio per ambito</h3>

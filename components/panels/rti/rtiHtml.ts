@@ -1,65 +1,47 @@
-import type { Meta, RtiConfig } from '@/lib/types';
-import { EUR, EURM, PCT, FCOL, C } from '@/lib/format';
-import { donut, hbars, legchips, esc } from '@/lib/charts';
+import type { RtiConfig } from '@/lib/types';
+import { EURM, PCT, FCOL, C } from '@/lib/format';
+import { legchips, esc } from '@/lib/charts';
+import { chartRtiBullets } from '@/lib/chartsInsight';
 import type { RtiErosion } from '@/lib/rtiErosion';
-import { buildYearlyErosionChart, buildErosionProjectionChart } from './rtiCharts';
+import { buildErosionProjectionChart } from './rtiCharts';
 
-// Partner composition donut. `selP` is the partner whose quota is highlighted.
-export function buildDonutHtml(rti: RtiConfig, quotaVal: Record<string, number>, selP: string | null): string {
-  return donut(
-    rti.partners.map((p) => ({
-      label: `${p.name} · ${PCT(p.pct * 100)} · ${EURM(p.quota)}`,
-      v: p.quota,
-      c: FCOL[p.name] || C.slateL,
-      drillRti: p.name,
-      tip: `${p.name}\nQuota ${PCT(p.pct * 100)} · ${EUR(p.quota)}\nclic per vedere la sua erosione`,
+// Totale contratto + un bullet per OGNI partner dell'RTI (righe = rti.partners), ciascuno
+// contro la propria quota, con composizione del massimale e tempo trascorso.
+export function buildRtiBulletsHtml(rti: RtiConfig, e: RtiErosion, selP: string | null): string {
+  const partners = rti.partners.map((p) => ({ name: p.name, color: FCOL[p.name] || C.slateL, pct: p.pct, quota: p.quota }));
+  const total = e.summaryRows[e.summaryRows.length - 1];
+  const rows = [
+    {
+      name: total.label,
+      color: total.color,
+      quota: total.quota,
+      realEur: total.realEur,
+      realPct: total.realPct,
+      projectedPct: total.projectedPct,
+      projectedEur: total.projectedEur,
+    },
+    ...e.summaryRows.slice(0, -1).map((r) => ({
+      name: r.label,
+      color: r.color,
+      quota: r.quota,
+      realEur: r.realEur,
+      realPct: r.realPct,
+      projectedPct: r.projectedPct,
+      projectedEur: r.projectedEur,
+      drillRti: r.label,
     })),
-    selP
-      ? EURM(quotaVal[selP]).replace('€ ', '').replace(' Mln', '')
-      : EURM(rti.ceiling).replace('€ ', '').replace(' Mln', ''),
-    selP ? 'Mln quota ' + selP : 'Mln massimale contr.',
-  );
+  ];
+  return chartRtiBullets({ ceiling: rti.ceiling, partners, rows, elapsedPct: e.theoreticalTodayPct, selected: selP });
 }
 
-// Per-partner erosion bars (impegnato / own quota).
-export function buildPartnerBarsHtml(rti: RtiConfig, impByP: Record<string, number>): string {
-  return hbars(
-    rti.partners.map((p) => {
-      const im = impByP[p.name] || 0;
-      const pc = p.quota ? (im / p.quota) * 100 : 0;
-      return {
-        label: p.name,
-        v: pc,
-        disp: EURM(im),
-        sub: '/ ' + EURM(p.quota) + ' · ' + PCT(pc),
-        c: FCOL[p.name] || C.slateL,
-        tip: `${p.name}\nImpegnato ${EUR(im)} su quota ${EUR(p.quota)}\nErosione ${PCT(pc)}`,
-      };
-    }),
-    undefined,
-    { max: 100 },
-  );
-}
-
-export function buildEroAnnoHtml(e: RtiErosion, meta: Meta): string {
-  const { ceil, totImpegnato, eroTotPct, residuo, fillW, totRisk, years, impByYear, annualQuota, todayYear } = e;
-  const eroAnnoSvg = buildYearlyErosionChart(years, impByYear, annualQuota, todayYear);
-  const eroAnnoHtml = `<div>
-    <div class="erohead" style="margin-bottom:12px">
-      <div class="erorow"><span>Massimale contrattuale</span><b>${EURM(ceil)} · <span style="color:${totRisk.color}">${totRisk.label}</span></b></div>
-      <div class="erotrack"><div class="erofill" style="width:${fillW.toFixed(1)}%;background:${totRisk.color}">${PCT(eroTotPct)}</div></div>
-      <div class="eroleg"><span>Impegnato totale <b>${EURM(totImpegnato)}</b></span><span>${
-        residuo < 0
-          ? `<b style="color:${C.bad}">Sforamento ${EURM(-residuo)}</b>`
-          : `Residuo <b>${EURM(residuo)}</b>`
-      }</span></div>
-    </div>
-    ${eroAnnoSvg}
-    <div style="font-size:11px;color:var(--muted);margin-top:6px">
-      Contratto ${meta.contract_date} → ${meta.valid_to} · Budget annuo stimato ${EURM(annualQuota)} · IF/BO raggruppati per anno di inizio
-    </div>
-  </div>`;
-  return eroAnnoHtml;
+// Riga di sintesi sotto il grafico: massimale, impegnato, residuo (o sforamento) e rischio.
+export function buildRtiSummaryLine(e: RtiErosion): string {
+  const { ceil, totImpegnato, eroTotPct, residuo, totRisk } = e;
+  const resid =
+    residuo < 0 ? `<b style="color:${C.bad}">Sforamento ${EURM(-residuo)}</b>` : `Residuo <b>${EURM(residuo)}</b>`;
+  return `<div class="eroleg" style="margin-top:10px"><span>Massimale contrattuale <b>${EURM(ceil)}</b> · <span style="color:${totRisk.color}">${esc(
+    totRisk.label,
+  )}</span></span><span>Impegnato totale <b>${EURM(totImpegnato)}</b> (${PCT(eroTotPct)})</span><span>${resid}</span></div>`;
 }
 
 export function buildEroTotalPctHtml(e: RtiErosion): string {
