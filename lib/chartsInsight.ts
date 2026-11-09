@@ -2,7 +2,7 @@
 // riferimento (piano, totale iniziale, quota). Builder puri: dati in ingresso, stringa
 // SVG in uscita. Input incoerenti → ChartInputError (errore di programmazione);
 // dati semplicemente assenti → blocco "empty" (caso normale a runtime).
-import { C, EUR, PCT, clamp } from './format';
+import { C, EROSION_THRESHOLDS, EUR, PCT, clamp } from './format';
 import { esc } from './charts';
 import {
   ChartInputError,
@@ -512,4 +512,108 @@ export function chartSeniority(input: readonly SeniorityBar[]): string {
     out += svgText(W - 6, y + (rh - 12) / 2 + 4, cost != null ? eurCompact(cost) : '—', { anchor: 'end', fill: C.ink, weight: 700, size: 12 });
   });
   return svgWrap(W, top + rows.length * rh + 10, out);
+}
+
+// ---------------------------------------------------------------------------
+// P8 — Quanta quota hanno consumato tutte le aziende dell'RTI rispetto al tempo?
+// Composizione del massimale + un bullet chart per il totale e per OGNI partner,
+// ciascuno contro la propria quota, con il tempo contrattuale trascorso.
+// ---------------------------------------------------------------------------
+export type RtiPartnerShare = { name: string; color: string; pct: number; quota: number }; // pct: frazione 0..1 del massimale
+
+export type RtiBulletRow = {
+  name: string;
+  color: string;
+  quota: number;
+  realEur: number | null; // null = contratto non ancora iniziato
+  realPct: number | null; // % della PROPRIA quota
+  projectedPct: number | null;
+  projectedEur: number | null;
+  drillRti?: string; // se presente, il clic seleziona il partner
+};
+
+export type RtiBulletsInput = {
+  ceiling: number;
+  partners: readonly RtiPartnerShare[];
+  rows: readonly RtiBulletRow[]; // prima il totale, poi un partner per riga
+  elapsedPct: number; // tempo contrattuale trascorso, 0..100
+  selected?: string | null;
+};
+
+const RTI_MAX_ROWS = 20;
+const RTI_AXIS_MAX = 120; // % oltre cui la barra viene troncata (il valore resta scritto)
+
+function riskColor(pct: number): string {
+  if (pct >= EROSION_THRESHOLDS.critical) return C.bad;
+  if (pct >= EROSION_THRESHOLDS.warn) return C.amberD;
+  return C.petrol;
+}
+
+function rtiComposition(partners: readonly RtiPartnerShare[], pl: number, bw: number, ceiling: number, selected: string | null): string {
+  let out = svgText(pl, 14, `Composizione del massimale · ${eurCompact(ceiling)}`, { fill: C.ink, weight: 700, size: 12.5 });
+  let acc = 0;
+  for (const p of partners) {
+    const w = bw * Math.max(0, p.pct);
+    const dim = selected && selected !== p.name ? ' opacity="0.45"' : '';
+    const tip = `${p.name}\nQuota ${PCT(p.pct * 100)} · ${EUR(p.quota)}\nclic per evidenziarla`;
+    out += svgRect(pl + acc, 24, Math.max(0, w - 1.5), 28, p.color, 3, `data-drill-rti="${esc(p.name)}" style="cursor:pointer"${dim}${tipAttr(tip)}`);
+    if (w > 46) out += svgText(pl + acc + w / 2, 43, PCT(p.pct * 100), { anchor: 'middle', fill: '#fff', weight: 700, size: 11, extra: 'pointer-events="none"' });
+    acc += w;
+  }
+  return out;
+}
+
+function rtiBullet(r: RtiBulletRow, i: number, g: { pl: number; bw: number; y: number; elapsed: number; W: number; selected: string | null }): string {
+  const h = 22;
+  const x = (pc: number): number => g.pl + (g.bw * Math.min(Math.max(pc, 0), RTI_AXIS_MAX)) / RTI_AXIS_MAX;
+  const isSel = g.selected === r.name;
+  const warn = EROSION_THRESHOLDS.warn;
+  const crit = EROSION_THRESHOLDS.critical;
+  let out = svgRect(g.pl, g.y, x(warn) - g.pl, h + 10, LINE2);
+  out += svgRect(x(warn), g.y, x(crit) - x(warn), h + 10, C.gold, 0, 'opacity="0.35"');
+  out += svgRect(x(crit), g.y, x(RTI_AXIS_MAX) - x(crit), h + 10, C.bad, 0, 'opacity="0.28"');
+  if (r.realPct != null) out += svgRect(g.pl, g.y + 5, x(r.realPct) - g.pl, h, riskColor(r.realPct), 3);
+  out += svgLine(x(g.elapsed), g.y - 3, x(g.elapsed), g.y + h + 13, C.ink, 2);
+  out += svgRect(12, g.y + 8, 9, 9, r.color, 2);
+  out += svgText(28, g.y + h / 2 + 9, clamp(r.name, 20), { fill: C.ink, weight: i === 0 || isSel ? 700 : 500, size: 12.5 });
+  out += svgText(g.pl - 10, g.y + h + 24, eurCompact(r.quota), { anchor: 'end', fill: C.muted, size: 10.5 });
+  if (r.realPct != null) {
+    out += svgText(Math.max(x(r.realPct) - 6, g.pl + 34), g.y + h / 2 + 10, `${Math.round(r.realPct)}%`, { anchor: 'end', fill: '#fff', weight: 700, size: 11.5, extra: 'pointer-events="none"' });
+  }
+  const proj = r.projectedPct;
+  out += svgText(g.W - 6, g.y + h / 2 + 10, proj == null ? '—' : `≈ ${Math.round(proj)}%`, { anchor: 'end', fill: proj != null && proj > 100 ? C.bad : C.ink, weight: 700, size: 13 });
+  const tip =
+    `${r.name}\nQuota ${EUR(r.quota)}\n` +
+    (r.realPct == null || r.realEur == null
+      ? 'Contratto non ancora iniziato'
+      : `Impegnato ${EUR(r.realEur)} · erosione ${PCT(r.realPct)}\nProiezione a fine contratto: ${proj == null ? '—' : PCT(proj)}`) +
+    (r.drillRti ? '\nclic per evidenziarla' : '');
+  const drillAttr = r.drillRti ? ` data-drill-rti="${esc(r.drillRti)}"` : '';
+  const style = r.drillRti ? 'pointer-events:all;cursor:pointer' : 'pointer-events:all';
+  return out + svgRect(0, g.y - 4, g.W, h + 30, 'transparent', 0, `style="${style}"${drillAttr}${tipAttr(tip)}`);
+}
+
+export function chartRtiBullets(inp: RtiBulletsInput): string {
+  assertMaxLen('rows', inp.rows.length, RTI_MAX_ROWS);
+  assertMaxLen('partners', inp.partners.length, RTI_MAX_ROWS);
+  assertFinite('elapsedPct', [inp.elapsedPct, inp.ceiling]);
+  assertFinite('partners', inp.partners.flatMap((p) => [p.pct, p.quota]));
+  assertFinite('rows', inp.rows.flatMap((r) => [r.quota, r.realPct ?? 0, r.projectedPct ?? 0]));
+  if (inp.rows.length === 0) return EMPTY('Nessun partner RTI configurato');
+  const W = 920;
+  const pl = 190;
+  const bw = W - pl - 130;
+  const rh = 58;
+  const top = inp.partners.length ? 110 : 40;
+  const selected = inp.selected ?? null;
+  const elapsed = Math.min(100, Math.max(0, inp.elapsedPct));
+  let out = inp.partners.length ? rtiComposition(inp.partners, pl, bw, inp.ceiling, selected) : '';
+  out += svgText(pl, top - 22, 'Impegnato rispetto alla propria quota', { fill: C.ink, weight: 700, size: 12.5 });
+  out += svgText(W - 6, top - 22, 'A fine contratto', { anchor: 'end', fill: C.ink, weight: 700, size: 12.5 });
+  inp.rows.forEach((r, i) => {
+    out += rtiBullet(r, i, { pl, bw, y: top + i * rh, elapsed, W, selected });
+  });
+  const yEnd = top + inp.rows.length * rh;
+  out += svgText(pl + (bw * elapsed) / RTI_AXIS_MAX, yEnd + 4, `tempo trascorso ${Math.round(elapsed)}%`, { anchor: 'middle', fill: C.ink, weight: 700, size: 10.5 });
+  return svgWrap(W, yEnd + 16, out);
 }

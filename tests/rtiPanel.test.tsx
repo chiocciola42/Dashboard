@@ -4,8 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import RTIPanel from '@/components/panels/RTIPanel';
 import RtiConfigForm from '@/components/panels/rti/RtiConfigForm';
 import RtiSummaryTable from '@/components/panels/rti/RtiSummaryTable';
-import { buildErosionProjectionChart, buildYearlyErosionChart } from '@/components/panels/rti/rtiCharts';
+import { buildErosionProjectionChart } from '@/components/panels/rti/rtiCharts';
 import { computeRtiErosion } from '@/lib/rtiErosion';
+import { ChartInputError } from '@/lib/chartKit';
+import { chartRtiBullets } from '@/lib/chartsInsight';
 import type { Meta, RtiConfig } from '@/lib/types';
 import { makeIf } from './helpers/fixtures';
 
@@ -27,7 +29,7 @@ const IFs = [
   makeIf({ numero_if: '2', fornitore: 'Deloitte', importo: 300_000, data_inizio: null }),
 ];
 const quotaVal = { Intellera: 6_500_000, Deloitte: 2_000_000 };
-const text = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+const text = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/\s+/g, ' ');
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -41,9 +43,7 @@ describe('RTIPanel', () => {
   it('renders every chart card and the numeric summary', () => {
     const t = text(renderToStaticMarkup(<RTIPanel {...base} />));
     for (const s of [
-      'Composizione del RTI',
-      'Erosione della quota per partner RTI',
-      'Erosione per Anno',
+      "Quanta quota hanno consumato tutte le aziende dell'RTI rispetto al tempo trascorso?",
       'Erosione teorica vs reale del massimale (%)',
       'Erosione teorica vs reale del massimale (valore)',
       'Erosione teorica vs reale delle quote per azienda (%)',
@@ -66,7 +66,7 @@ describe('RTIPanel', () => {
   it('highlights the selected partner and offers to reset', () => {
     const t = text(renderToStaticMarkup(<RTIPanel {...base} rtiSel="Intellera" />));
     expect(t).toContain('Stai vedendo la quota di Intellera');
-    expect(text(renderToStaticMarkup(<RTIPanel {...base} />))).toContain('Clic su uno spicchio');
+    expect(text(renderToStaticMarkup(<RTIPanel {...base} />))).toContain("Clic su un'azienda");
   });
 
   it('uses the filtered supplier as the selection when it has a quota', () => {
@@ -105,14 +105,56 @@ describe('RtiConfigForm', () => {
   });
 });
 
-describe('SVG chart builders', () => {
-  it('yearly chart: one bar per year, today marker only for a year in range', () => {
-    const svg = buildYearlyErosionChart([2025, 2026, 2027], { 2025: 1e6, 2026: 2e6, 2027: 0 }, 1.5e6, 2026);
-    expect((svg.match(/<rect /g) || []).length).toBe(3);
-    expect(svg).toContain('>oggi<');
-    expect(buildYearlyErosionChart([2025], { 2025: 1 }, 1, 2040)).not.toContain('>oggi<');
+describe('RTI bullet chart (all partners)', () => {
+  const five = {
+    ...rti,
+    partners: [
+      { name: 'Intellera', pct: 0.45, quota: 4_500_000, impegnato: 0 },
+      { name: 'Deloitte', pct: 0.25, quota: 2_500_000, impegnato: 0 },
+      { name: 'Gellify', pct: 0.12, quota: 1_200_000, impegnato: 0 },
+      { name: 'PGMD', pct: 0.1, quota: 1_000_000, impegnato: 0 },
+      { name: 'Accenture', pct: 0.08, quota: 800_000, impegnato: 0 },
+    ],
+  };
+  const ifs5 = five.partners.map((p, i) => makeIf({ numero_if: `f${i}`, fornitore: p.name, importo: p.quota * 0.5 }));
+
+  it('draws one drillable row per configured partner plus the total, not only Intellera and Deloitte', () => {
+    const html = renderToStaticMarkup(<RTIPanel {...base} rti={five} IFs={ifs5} />);
+    for (const n of ['Intellera', 'Deloitte', 'Gellify', 'PGMD', 'Accenture']) {
+      expect(html).toContain(`data-drill-rti="${n}"`);
+    }
+    expect(text(html)).toContain('Totale contratto');
   });
 
+  it('a partner added in the configuration appears without code changes', () => {
+    const six = { ...five, partners: [...five.partners, { name: 'Nuova', pct: 0.05, quota: 500_000, impegnato: 0 }] };
+    expect(renderToStaticMarkup(<RTIPanel {...base} rti={six} IFs={ifs5} />)).toContain('data-drill-rti="Nuova"');
+  });
+
+  it('clicking a row selects the partner through the existing selection hook', () => {
+    const html = renderToStaticMarkup(<RTIPanel {...base} rti={five} IFs={ifs5} rtiSel="Gellify" />);
+    expect(text(html)).toContain('Stai vedendo la quota di Gellify');
+  });
+
+  it('shows dashes instead of bars before the contract starts', () => {
+    vi.setSystemTime(new Date('2020-01-01T00:00:00Z'));
+    const html = renderToStaticMarkup(<RTIPanel {...base} rti={five} IFs={ifs5} />);
+    expect(text(html)).toContain('tempo trascorso 0%');
+    expect(html).not.toContain('NaN');
+  });
+
+  it('builder validates its input and handles no partners', () => {
+    const row = { name: 'T', color: '#111', quota: 1, realEur: 1, realPct: 50, projectedPct: 80, projectedEur: 2 };
+    expect(chartRtiBullets({ ceiling: 1, partners: [], rows: [], elapsedPct: 10 })).toContain('Nessun partner');
+    expect(() => chartRtiBullets({ ceiling: 1, partners: [], rows: [{ ...row, realPct: NaN }], elapsedPct: 10 })).toThrow(ChartInputError);
+    expect(() => chartRtiBullets({ ceiling: 1, partners: [], rows: Array(21).fill(row), elapsedPct: 10 })).toThrow(ChartInputError);
+    const html = chartRtiBullets({ ceiling: 1, partners: [], rows: [row, { ...row, realPct: 150, projectedPct: 200 }], elapsedPct: 250 });
+    expect(html).not.toContain('NaN');
+    expect(html).toContain('tempo trascorso 100%');
+  });
+});
+
+describe('SVG chart builders', () => {
   it('projection chart: draws a real and projected line per company with data', () => {
     const t0 = Date.parse('2024-01-01'), t1 = Date.parse('2029-01-01'), now = Date.parse('2026-07-01');
     const svg = buildErosionProjectionChart(t0, t1, now, [

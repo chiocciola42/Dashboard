@@ -99,6 +99,24 @@ export const FORMULA_CATALOG: FormulaRow[] = [
   },
   {
     pagina: '1 Overview',
+    sezione: 'Revenue mensile',
+    elemento: 'Consuntivato cumulato al mese m',
+    formula: 'cumCons[m] = Σ(k=Gen..m) Σ cons_mesi[k]  (solo mesi trascorsi)',
+    spiegazione:
+      'Curva del consuntivato (cons_mesi) da gennaio al mese m, disegnata solo fino al mese corrente (anno in corso), per intero in un anno concluso, assente in un anno non iniziato.',
+    sorgenti: 'intervento_mesi.consuntivo (anno selezionato)',
+  },
+  {
+    pagina: '1 Overview',
+    sezione: 'Revenue mensile',
+    elemento: 'Scostamento a oggi vs competenza',
+    formula: 'cumCons[ultimo mese trascorso] − cumV[ultimo mese trascorso]',
+    spiegazione:
+      'Distanza fra consuntivato cumulato e revenue di competenza cumulata allo stesso mese: positivo = consuntivato in anticipo sulla competenza, negativo = in ritardo.',
+    sorgenti: 'intervento_mesi.revenue, intervento_mesi.consuntivo (anno selezionato)',
+  },
+  {
+    pagina: '1 Overview',
     sezione: 'Indicatori sintetici',
     elemento: 'Revenue da gennaio ad oggi',
     formula: 'revToDate = Σ(m=Gen..mese_corrente) revM[m]',
@@ -181,7 +199,7 @@ export const FORMULA_CATALOG: FormulaRow[] = [
   // =========================================================================
   {
     pagina: '2 Quote RTI',
-    sezione: 'Composizione del RTI (donut)',
+    sezione: 'Composizione del massimale',
     elemento: 'Quota € del partner',
     formula: 'quota_p = ceiling × pct_p',
     spiegazione:
@@ -190,7 +208,7 @@ export const FORMULA_CATALOG: FormulaRow[] = [
   },
   {
     pagina: '2 Quote RTI',
-    sezione: 'Composizione del RTI (donut)',
+    sezione: 'Composizione del massimale',
     elemento: 'Somma quote %',
     formula: 'Σ pct_p × 100  (atteso = 100%)',
     spiegazione: 'Controllo di quadratura: la somma delle percentuali dei partner deve dare 100%.',
@@ -215,29 +233,12 @@ export const FORMULA_CATALOG: FormulaRow[] = [
   },
   {
     pagina: '2 Quote RTI',
-    sezione: 'Erosione per anno',
-    elemento: 'Anni del contratto',
-    formula: 'anni = da anno(meta.contract_date) a anno(meta.valid_to) inclusi',
-    spiegazione: 'Intervallo di anni coperto dalla durata contrattuale, usato per l’asse del grafico.',
-    sorgenti: 'meta.contract_date, meta.valid_to',
-  },
-  {
-    pagina: '2 Quote RTI',
-    sezione: 'Erosione per anno',
-    elemento: 'Budget annuo (linea di riferimento)',
-    formula: 'annualQuota = ceiling / numero_anni',
-    spiegazione: 'Massimale ripartito uniformemente sugli anni di contratto: budget medio annuo.',
-    sorgenti: 'config RTI (massimale), durata contratto',
-  },
-  {
-    pagina: '2 Quote RTI',
-    sezione: 'Erosione per anno',
-    elemento: 'Impegnato per anno',
-    formula:
-      'impByYear[y] = Σ importo delle IF con anno(data_inizio) = y (fallback: primo anno se data_inizio assente)',
+    sezione: 'Erosione per partner',
+    elemento: 'Tempo contrattuale trascorso (segno nel grafico)',
+    formula: '(oggi − meta.contract_date) / (meta.valid_to − meta.contract_date) × 100, limitato a 0..100',
     spiegazione:
-      'Impegnato distribuito per anno di inizio della IF; le IF senza data di inizio confluiscono nel primo anno.',
-    sorgenti: 'interventi.importo, interventi.data_inizio',
+      'Posizione del segno nero in ogni riga del grafico: confronta l’erosione della quota di ciascuna azienda con la quota di tempo di contratto già trascorsa.',
+    sorgenti: 'meta.contract_date, meta.valid_to',
   },
   {
     pagina: '2 Quote RTI',
@@ -293,6 +294,15 @@ export const FORMULA_CATALOG: FormulaRow[] = [
     formula: 'consuntivato[m] = Σ cons_mesi[m] delle IF con fornitore = Intellera',
     spiegazione: 'Serie di consuntivazione/fatturazione ricostruita dai profili cons_mesi delle IF Intellera.',
     sorgenti: 'intervento_mesi.consuntivo (Intellera, tutti gli anni)',
+  },
+  {
+    pagina: '3 Timeline',
+    sezione: 'Serie Revenue vs Fatturazione',
+    elemento: 'Da fatturare ad oggi (area gialla)',
+    formula: 'Σ revenue[0..t] − Σ fatturato[0..t]  (fatturato = BEF emesso se presente, altrimenti fatturazione a piano)',
+    spiegazione:
+      'Revenue maturata fino al periodo corrente t e non ancora fatturata: distanza fra la curva revenue cumulata e quella del fatturato di riferimento.',
+    sorgenti: 'intervento_mesi.revenue, bef_records.importo_ricezione, intervento_mesi.consuntivo',
   },
   {
     pagina: '3 Timeline',
@@ -443,6 +453,15 @@ export const FORMULA_CATALOG: FormulaRow[] = [
   },
   {
     pagina: '4 Distribuzione',
+    sezione: '4a — Per Ambito',
+    elemento: '% cumulata (soglia 80%)',
+    formula: 'cum[i] = Σ(k<=i) valore_k / totale × 100, ambiti in ordine di valore decrescente',
+    spiegazione:
+      'Quota di valore coperta dai primi i ambiti; la linea tratteggiata marca il primo ambito che porta la cumulata oltre l’80%. Oltre 12 ambiti il resto confluisce in «Altri».',
+    sorgenti: 'interventi.importo, interventi.ambito',
+  },
+  {
+    pagina: '4 Distribuzione',
     sezione: '4b — Per Referente ARIA',
     elemento: 'Intellera € per referente',
     formula: 'Intellera[ref] = Σ importo delle IF con ref_aria = k e fornitore = Intellera',
@@ -494,8 +513,16 @@ export const FORMULA_CATALOG: FormulaRow[] = [
     sezione: '4c — Per Seniority',
     elemento: 'GG totali',
     formula: 'totg = Σ gg[figura]',
-    spiegazione: 'Totale delle giornate/uomo pianificate su tutte le figure (centro del donut).',
+    spiegazione: 'Totale delle giornate/uomo pianificate su tutte le figure.',
     sorgenti: 'tariffe/seniority: gg',
+  },
+  {
+    pagina: '4 Distribuzione',
+    sezione: '4c — Per Seniority',
+    elemento: 'Costo per figura',
+    formula: 'costo = GG/Uomo × tariffa (non mostrato se la tariffa manca)',
+    spiegazione: 'Costo complessivo pianificato di ciascuna figura professionale, scritto accanto alla barra dei GG.',
+    sorgenti: 'seniority.gg, seniority.tariffa',
   },
   {
     pagina: '4 Distribuzione',
