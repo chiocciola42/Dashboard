@@ -36,15 +36,18 @@ const HALO = `paint-order="stroke" stroke="#fff" stroke-width="3" stroke-linejoi
 const tipAttr = (tip: string): string => ` data-tip="${esc(tip)}" class="seg"`;
 
 // ---------------------------------------------------------------------------
-// P1 — Siamo in linea con il ritmo di revenue previsto?
-// Sopra: cumulato consuntivato vs cumulato di competenza (stesso asse €).
-// Sotto: barre mensili, mesi non ancora consuntivati tratteggiati.
+// P1 — Quanta revenue è maturata e quanta resta da maturare nell'anno?
+// Sopra: cumulato della revenue di competenza (pieno fino a oggi, tratteggiato per i
+// mesi futuri) ed, SE disponibile, il consuntivato cumulato come confronto.
+// Sotto: barre mensili di competenza, mesi futuri tratteggiati.
+// Il consuntivato (cons_mesi) esiste solo per le IF attivate: senza, il grafico
+// resta pienamente leggibile sulla sola revenue.
 // ---------------------------------------------------------------------------
 export type PaceInput = {
   labels: readonly string[];
   plan: readonly number[]; // revenue di competenza per periodo (tutto l'anno)
-  actual: readonly number[]; // consuntivato per periodo
-  lastActual: number; // ultimo indice consuntivabile: -1 nessuno, n-1 tutti
+  actual?: readonly number[] | null; // consuntivato per periodo, se disponibile
+  lastActual: number; // ultimo indice trascorso: -1 nessuno, n-1 tutti
   periodLabel?: string;
   todayLabel?: string; // se presente, marca `lastActual` con questa etichetta (es. "oggi")
 };
@@ -54,39 +57,42 @@ export type PaceGeom = { W: number; pl: number; pr: number; x: (i: number) => nu
 function validatePace(inp: PaceInput): void {
   assertMaxLen('labels', inp.labels.length);
   assertSameLength('plan', inp.plan, inp.labels);
-  assertSameLength('actual', inp.actual, inp.labels);
   assertFinite('plan', inp.plan);
-  assertFinite('actual', inp.actual);
+  if (inp.actual) {
+    assertSameLength('actual', inp.actual, inp.labels);
+    assertFinite('actual', inp.actual);
+  }
 }
 
-function paceTop(g: PaceGeom, cumPlan: number[], cumAct: number[], top: number, h: number): string {
-  const last = cumAct.length - 1;
-  const max = niceCeil(Math.max(cumPlan[cumPlan.length - 1] || 0, cumAct[last] || 0));
-  const y = linearScale(0, max, top + h, top);
-  let out = hGrid(g.pl, g.W - g.pr, y, max, 4, eurCompact, { line: C.line, text: C.muted });
-  out += svgPath(pathD(cumPlan.map((v, i) => [g.x(i), y(v)] as const)), { stroke: C.slate, width: 2, dash: '6 4' });
-  const lastPlan = cumPlan.length - 1;
-  out += svgText(g.x(lastPlan) + 10, y(cumPlan[lastPlan]) + 4, `Competenza ${eurCompact(cumPlan[lastPlan])}`, {
-    fill: C.muted,
-    size: 11,
-  });
-  if (last < 0) return out;
-  const pts = cumAct.map((v, i) => [g.x(i), y(v)] as const);
-  out += svgPath(`${pathD(pts)} L${g.x(last).toFixed(1)},${y(0).toFixed(1)} L${g.x(0).toFixed(1)},${y(0).toFixed(1)} Z`, {
-    fill: C.petrol,
-    opacity: 0.1,
-  });
-  out += svgPath(pathD(pts), { stroke: C.petrol, width: 3 });
-  out += svgCircle(g.x(last), y(cumAct[last]), 5, C.petrol);
+// Consuntivato utilizzabile: presente e con almeno un valore > 0.
+export function hasActualSeries(actual: readonly number[] | null | undefined): actual is readonly number[] {
+  return !!actual && actual.some((v) => v > 0);
+}
+
+function paceRevenueLines(g: PaceGeom, cumPlan: number[], last: number, y: (v: number) => number): string {
+  const n = cumPlan.length;
+  const pt = (i: number) => [g.x(i), y(cumPlan[i])] as const;
+  const idx = (from: number, to: number): number[] => Array.from({ length: Math.max(0, to - from + 1) }, (_, k) => from + k);
+  let out = '';
+  if (last < n - 1) {
+    out += svgPath(pathD(idx(Math.max(last, 0), n - 1).map(pt)), { stroke: C.petrol, width: 2.4, dash: '6 4', opacity: 0.8 });
+  }
+  if (last >= 0) {
+    const solid = idx(0, last).map(pt);
+    out += svgPath(`${pathD(solid)} L${g.x(last).toFixed(1)},${y(0).toFixed(1)} L${g.x(0).toFixed(1)},${y(0).toFixed(1)} Z`, { fill: C.petrol, opacity: 0.1 });
+    out += svgPath(pathD(solid), { stroke: C.petrol, width: 3 });
+    out += svgCircle(g.x(last), y(cumPlan[last]), 5, C.petrol);
+  }
+  return out;
+}
+
+function paceActualLine(g: PaceGeom, cumAct: number[], cumPlan: number[], last: number, y: (v: number) => number): string {
+  if (last < 0) return '';
+  let out = svgPath(pathD(cumAct.map((v, i) => [g.x(i), y(v)] as const)), { stroke: C.amberD, width: 2.4 });
+  out += svgCircle(g.x(last), y(cumAct[last]), 4.5, C.amberD);
   const delta = cumAct[last] - cumPlan[last];
-  const sign = delta >= 0 ? '+' : '−';
-  out += svgText(g.x(last) - 8, y(cumAct[last]) - 12, `Consuntivato ${eurCompact(cumAct[last])}`, {
+  out += svgText(g.x(last) - 10, y(cumAct[last]) + 26, `Consuntivato ${eurCompact(cumAct[last])} · ${delta >= 0 ? '+' : '−'}${eurCompact(Math.abs(delta))} vs competenza`, {
     anchor: 'end',
-    fill: C.ink,
-    weight: 700,
-    size: 12,
-  });
-  out += svgText(g.x(last) + 12, y(cumAct[last]) + 24, `${sign}${eurCompact(Math.abs(delta))} vs competenza a oggi`, {
     fill: delta >= 0 ? C.good : C.bad,
     weight: 700,
     size: 11.5,
@@ -95,35 +101,48 @@ function paceTop(g: PaceGeom, cumPlan: number[], cumAct: number[], top: number, 
   return out;
 }
 
+function paceTop(g: PaceGeom, cumPlan: number[], cumAct: number[] | null, last: number, top: number, h: number): string {
+  const n = cumPlan.length;
+  const max = niceCeil(Math.max(cumPlan[n - 1] || 0, cumAct ? cumAct[Math.max(last, 0)] || 0 : 0));
+  const y = linearScale(0, max, top + h, top);
+  let out = hGrid(g.pl, g.W - g.pr, y, max, 4, eurCompact, { line: C.line, text: C.muted });
+  out += paceRevenueLines(g, cumPlan, last, y);
+  out += svgText(g.x(n - 1) + 10, y(cumPlan[n - 1]) + 4, `Anno ${eurCompact(cumPlan[n - 1])}`, { fill: C.muted, size: 11 });
+  if (last >= 0) {
+    const share = cumPlan[n - 1] > 0 ? ` · ${PCT((cumPlan[last] / cumPlan[n - 1]) * 100)} dell'anno` : '';
+    out += svgText(g.x(last) - 8, y(cumPlan[last]) - 12, `Maturata ${eurCompact(cumPlan[last])}${share}`, { anchor: 'end', fill: C.ink, weight: 700, size: 12, extra: HALO });
+  }
+  if (cumAct) out += paceActualLine(g, cumAct, cumPlan, last, y);
+  return out;
+}
+
 function paceBars(inp: PaceInput, g: PaceGeom, base: number, h: number): string {
   const n = inp.labels.length;
-  const max = niceCeil(Math.max(...inp.plan, ...inp.actual, 1));
+  const max = niceCeil(Math.max(...inp.plan, 1));
   const y = linearScale(0, max, base, base - h);
   const bw = Math.min(46, ((g.W - g.pl - g.pr) / Math.max(1, n - 1)) * 0.6);
-  let out = svgText(g.pl, base - h - 10, 'Per periodo', { fill: C.ink, weight: 600, size: 12 });
+  let out = svgText(g.pl, base - h - 10, 'Revenue di competenza per periodo', { fill: C.ink, weight: 600, size: 12 });
   for (let i = 0; i < n; i++) {
-    const done = i <= inp.lastActual;
-    const v = done ? inp.actual[i] : inp.plan[i];
+    const v = inp.plan[i];
     const x = g.x(i) - bw / 2;
-    out += done
-      ? svgRect(x, y(v), bw, base - y(v), C.petrol, 3)
-      : svgRect(x, y(v), bw, base - y(v), 'none', 3, `stroke="${C.slateL}" stroke-width="1.5" stroke-dasharray="3 3"`);
+    out +=
+      i <= inp.lastActual
+        ? svgRect(x, y(v), bw, base - y(v), C.petrol, 3)
+        : svgRect(x, y(v), bw, base - y(v), 'none', 3, `stroke="${C.slateL}" stroke-width="1.5" stroke-dasharray="3 3"`);
     out += svgText(g.x(i), base + 16, inp.labels[i], { anchor: 'middle', fill: C.muted, size: 11 });
   }
   return out + svgLine(g.pl, base, g.W - g.pr, base, C.line);
 }
 
-function paceHover(inp: PaceInput, g: PaceGeom, cumPlan: number[], cumAct: number[], top: number, bottom: number): string {
+function paceHover(inp: PaceInput, g: PaceGeom, cumPlan: number[], cumAct: number[] | null, top: number, bottom: number): string {
   const n = inp.labels.length;
   const slot = (g.W - g.pl - g.pr) / Math.max(1, n - 1);
   const per = inp.periodLabel ? ` ${inp.periodLabel}` : '';
   let out = '';
   for (let i = 0; i < n; i++) {
     const done = i <= inp.lastActual;
-    const tip =
-      `${inp.labels[i]}${per} · Revenue\n` +
-      `Competenza: ${EUR(inp.plan[i])} (cum. ${EUR(cumPlan[i])})\n` +
-      (done ? `Consuntivato: ${EUR(inp.actual[i])} (cum. ${EUR(cumAct[i])})` : 'Consuntivato: non ancora disponibile');
+    let tip = `${inp.labels[i]}${per} · Revenue\nCompetenza: ${EUR(inp.plan[i])} (cum. ${EUR(cumPlan[i])})${done ? '' : '\nperiodo non ancora trascorso'}`;
+    if (cumAct && inp.actual && done) tip += `\nConsuntivato: ${EUR(inp.actual[i])} (cum. ${EUR(cumAct[i])})`;
     out += svgRect(g.x(i) - slot / 2, top, slot, bottom - top, 'transparent', 0, `style="pointer-events:all"${tipAttr(tip)}`);
   }
   return out;
@@ -137,15 +156,14 @@ export function chartRevenuePace(inp: PaceInput): string {
   const g: PaceGeom = { W, pl: 78, pr: 150, x: linearScale(0, Math.max(1, n - 1), 78 + 20, W - 150 - 20) };
   const last = Math.min(inp.lastActual, n - 1);
   const cumPlan = cumulative(inp.plan);
-  const cumAct = last >= 0 ? cumulative(inp.actual.slice(0, last + 1)) : [];
+  const cumAct = hasActualSeries(inp.actual) && last >= 0 ? cumulative(inp.actual.slice(0, last + 1)) : null;
   const topY = 18;
   const topH = 230;
   const barsBase = topY + topH + 130;
-  let inner = paceTop(g, cumPlan, cumAct, topY, topH);
+  let inner = paceTop(g, cumPlan, cumAct, last, topY, topH);
   if (last >= 0 && inp.todayLabel) {
-    const lx = g.x(last);
-    inner += svgLine(lx, topY, lx, topY + topH, C.amberD, 1.2, '4 3');
-    inner += svgText(lx + 5, topY + 12, inp.todayLabel, { fill: C.amberD, weight: 700, size: 10 });
+    inner += svgLine(g.x(last), topY, g.x(last), topY + topH, C.amberD, 1.2, '4 3');
+    inner += svgText(g.x(last) + 5, topY + 12, inp.todayLabel, { fill: C.amberD, weight: 700, size: 10 });
   }
   inner += paceBars({ ...inp, lastActual: last }, g, barsBase, 80);
   inner += paceHover({ ...inp, lastActual: last }, g, cumPlan, cumAct, topY, barsBase);

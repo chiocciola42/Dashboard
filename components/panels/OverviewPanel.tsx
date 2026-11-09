@@ -3,7 +3,7 @@ import React from 'react';
 import type { Intervento, RtiConfig } from '@/lib/types';
 import { EUR, EUR0, EURM, PCT, MESI, C, erosionRisk } from '@/lib/format';
 import { legchips } from '@/lib/charts';
-import { chartRevenuePace } from '@/lib/chartsInsight';
+import { chartRevenuePace, hasActualSeries } from '@/lib/chartsInsight';
 import { cumulative } from '@/lib/chartKit';
 import { monthsElapsed } from '@/lib/fiscal';
 import { Html } from '../Html';
@@ -39,6 +39,7 @@ function OverviewPanel({
   const refYear = now.getFullYear();
   const consM = MESI.map((_, mi) => IFs.reduce((s, i) => s + ((i.cons_mesi && i.cons_mesi[mi]) || 0), 0));
   const cumRev = cumulative(revM);
+  const hasCons = hasActualSeries(consM);
   const sum = (a: number[], s: number, e: number) => a.slice(s, e).reduce((x, y) => x + y, 0);
   // Months elapsed so far this calendar year (Gen..mese corrente incluso) —
   // previously hardcoded to a fixed Gen-Giu slice regardless of the actual
@@ -113,16 +114,16 @@ function OverviewPanel({
         </div>
       </div>
       <ChartCard
-        title={`Consuntivato vs revenue di competenza · ${anno}`}
-        caption={`Cumulato consuntivato contro cumulato di competenza · totale competenza ${EUR(revTot)}`}
-        filename={`Revenue_consuntivato_${anno}`}
+        title={`Revenue maturata e prevista · ${anno}`}
+        caption={`Revenue di competenza cumulata e per mese${hasCons ? ', con il consuntivato a confronto' : ''} · totale anno ${EUR(revTot)}`}
+        filename={`Revenue_maturata_${anno}`}
       >
         <Html
-          ariaLabel={`Grafico del consuntivato cumulato contro la revenue di competenza ${anno} per la vista corrente. Competenza totale ${EUR(revTot)}, cumulato a fine anno ${EUR(cumRev[cumRev.length - 1] || 0)}. Valori per mese (competenza / consuntivato): ${MESI.map((m, i) => `${m} ${EUR(revM[i] || 0)} / ${EUR(consM[i] || 0)}`).join(', ')}.`}
+          ariaLabel={`Grafico della revenue di competenza ${anno} per la vista corrente, cumulata e per mese. Totale anno ${EUR(revTot)}, cumulato a fine anno ${EUR(cumRev[cumRev.length - 1] || 0)}. Valori per mese: ${MESI.map((m, i) => `${m} ${EUR(revM[i] || 0)}${hasCons ? ` (consuntivato ${EUR(consM[i] || 0)})` : ''}`).join(', ')}.`}
           html={chartRevenuePace({
             labels: MESI,
             plan: revM,
-            actual: consM,
+            actual: hasCons ? consM : null,
             lastActual: monthsElapsed(anno, now) - 1,
             // The "oggi" marker only makes sense in the current year.
             todayLabel: anno === refYear ? 'oggi' : undefined,
@@ -132,9 +133,10 @@ function OverviewPanel({
         <Html
           className="legrow"
           html={legchips([
-            { c: C.petrol, t: 'Consuntivato (cum.)', line: true },
-            { c: C.slate, t: 'Competenza (cum.)', dash: true },
-            { c: C.petrol, t: 'Consuntivato del mese' },
+            { c: C.petrol, t: 'Revenue maturata (cum.)', line: true },
+            { c: C.petrol, t: 'Revenue prevista (cum.)', dash: true },
+            ...(hasCons ? [{ c: C.amberD, t: 'Consuntivato (cum.)', line: true }] : []),
+            { c: C.petrol, t: 'Revenue del mese' },
             ...(anno === refYear ? [{ c: C.amberD, t: 'mese corrente', line: true }] : []),
           ])}
         />

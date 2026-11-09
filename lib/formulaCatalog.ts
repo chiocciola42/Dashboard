@@ -103,7 +103,7 @@ export const FORMULA_CATALOG: FormulaRow[] = [
     elemento: 'Consuntivato cumulato al mese m',
     formula: 'cumCons[m] = Σ(k=Gen..m) Σ cons_mesi[k]  (solo mesi trascorsi)',
     spiegazione:
-      'Curva del consuntivato (cons_mesi) da gennaio al mese m, disegnata solo fino al mese corrente (anno in corso), per intero in un anno concluso, assente in un anno non iniziato.',
+      'Curva del consuntivato (cons_mesi) da gennaio al mese m, disegnata solo fino al mese corrente (anno in corso) e solo se almeno un mese ha un valore: il consuntivato esiste per le IF attivate, senza di esso il grafico mostra la sola revenue di competenza.',
     sorgenti: 'intervento_mesi.consuntivo (anno selezionato)',
   },
   {

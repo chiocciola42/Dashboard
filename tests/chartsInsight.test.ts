@@ -18,6 +18,7 @@ import {
   chartShareCompare,
   foldTail,
   funnelFromStats,
+  hasActualSeries,
   paretoCutoff,
   seniorityCost,
 } from '@/lib/chartsInsight';
@@ -68,26 +69,45 @@ describe('chartKit', () => {
 describe('chartRevenuePace', () => {
   const base = { labels: L3, plan: [10, 20, 30], actual: [8, 25, 0], periodLabel: '2031' };
 
-  it('draws planned and actual cumulatives, the delta against plan and one hover column per period', () => {
+  it('REGRESSION: with no consuntivato at all the revenue is still drawn (solid up to today, dashed after)', () => {
+    for (const actual of [null, undefined, [0, 0, 0]]) {
+      const html = chartRevenuePace({ ...base, actual, lastActual: 1, todayLabel: 'oggi' });
+      expect(html).toContain('Maturata € 30');
+      expect(html).toContain("dell'anno");
+      expect(html).toContain('stroke-dasharray="6 4"'); // mesi futuri
+      expect(html).not.toContain('Consuntivato €');
+      expect(html).not.toContain('NaN');
+      expect(count(html, '<rect')).toBeGreaterThanOrEqual(3 + 3); // 3 barre + 3 colonne hover
+    }
+  });
+
+  it('adds the consuntivato line and its delta only when the series has data', () => {
     const html = chartRevenuePace({ ...base, lastActual: 1, todayLabel: 'oggi' });
-    expect(html).toContain('Consuntivato');
-    expect(html).toContain('vs competenza a oggi');
+    expect(html).toContain('Consuntivato € 33');
+    expect(html).toContain('+€ 3 vs competenza');
     expect(html).toContain('>oggi<');
-    expect(count(html, 'class="seg"')).toBe(3);
-    expect(html).toContain('Gen 2031 · Revenue');
-    expect(html).not.toContain('NaN');
+    expect(html).toContain('Consuntivato: € 8');
+    expect(chartRevenuePace({ ...base, actual: [1, 1, 0], lastActual: 1 })).toContain('−€ 28 vs competenza');
   });
 
-  it('colours a positive delta as good and a negative one as bad', () => {
-    expect(chartRevenuePace({ ...base, lastActual: 1 })).toContain('+€ 3');
-    expect(chartRevenuePace({ ...base, actual: [1, 1, 0], lastActual: 1 })).toContain('−€ 28');
+  it('hasActualSeries needs at least one positive value', () => {
+    expect(hasActualSeries(null)).toBe(false);
+    expect(hasActualSeries([0, 0])).toBe(false);
+    expect(hasActualSeries([0, 3])).toBe(true);
   });
 
-  it('draws no actual line and no marker when no period has elapsed (future year)', () => {
+  it('a future year draws the whole revenue as forecast, with no marker', () => {
     const html = chartRevenuePace({ ...base, lastActual: -1, todayLabel: 'oggi' });
-    expect(html).not.toContain('Consuntivato €');
+    expect(html).not.toContain('Maturata');
     expect(html).not.toContain('>oggi<');
-    expect(html).toContain('non ancora disponibile');
+    expect(html).toContain('Anno € 60');
+    expect(html).toContain('periodo non ancora trascorso');
+  });
+
+  it('a past year is drawn fully solid', () => {
+    const html = chartRevenuePace({ ...base, lastActual: 2 });
+    expect(html).toContain('Maturata € 60');
+    expect(html).toContain('100,0% dell\'anno');
   });
 
   it('clamps lastActual to the last period', () => {
@@ -95,14 +115,13 @@ describe('chartRevenuePace', () => {
   });
 
   it('empty input gives the empty state; inconsistent input throws', () => {
-    expect(chartRevenuePace({ labels: [], plan: [], actual: [], lastActual: -1 })).toContain('Nessun dato');
-    expect(() => chartRevenuePace({ ...base, actual: [1] , lastActual: 0 })).toThrow(ChartInputError);
+    expect(chartRevenuePace({ labels: [], plan: [], lastActual: -1 })).toContain('Nessun dato');
+    expect(() => chartRevenuePace({ ...base, actual: [1], lastActual: 0 })).toThrow(ChartInputError);
     expect(() => chartRevenuePace({ ...base, plan: [1, NaN, 3], lastActual: 0 })).toThrow(ChartInputError);
   });
 
   it('REGRESSION: all-zero data does not produce NaN', () => {
-    const html = chartRevenuePace({ labels: L3, plan: [0, 0, 0], actual: [0, 0, 0], lastActual: 2 });
-    expect(html).not.toContain('NaN');
+    expect(chartRevenuePace({ labels: L3, plan: [0, 0, 0], lastActual: 2 })).not.toContain('NaN');
   });
 });
 
