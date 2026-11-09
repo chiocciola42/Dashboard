@@ -175,7 +175,7 @@ describe('chartBillingGap', () => {
 
   it('with the fatturabile series it draws the third line, both gaps and the lag', () => {
     const html = chartBillingGap({ ...base, billable: [90, 80, 0], lastActual: 1, todayLabel: 'oggi' });
-    expect(html).toContain('Fatturabile reale € 170');
+    expect(html).toContain('Fatturabile € 170');
     expect(html).toContain('Revenue non ancora fatturabile');
     expect(html).toContain('€ 30'); // 200 - 170
     expect(html).toContain('Fatturabile non ancora fatturato');
