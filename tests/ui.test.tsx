@@ -42,12 +42,12 @@ describe('OverviewPanel', () => {
     expect(html).toContain('Revenue da gennaio ad oggi');
   });
 
-  it('REGRESSION: the monthly chart is titled, tagged and described with the selected year, not today\'s', () => {
+  it('REGRESSION: the revenue chart is titled, tagged and described with the selected year, not today\'s', () => {
     const html = renderToStaticMarkup(<OverviewPanel IFs={ifs} rti={rti} quotaVal={{}} anno={2031} />);
-    expect(html).toContain('Revenue mensile · 2031');
-    expect(html).toContain('Grafico a barre della revenue mensile 2031');
+    expect(html).toContain('Consuntivato vs revenue di competenza · 2031');
+    expect(html).toContain('Grafico del consuntivato cumulato contro la revenue di competenza 2031');
     expect(html).toContain('Gen 2031 · Revenue');
-    expect(html).not.toContain(`Revenue mensile · ${CY}`);
+    expect(html).not.toContain(`competenza · ${CY}`);
   });
 
   it('the "oggi" marker appears in the current year and nowhere else', () => {

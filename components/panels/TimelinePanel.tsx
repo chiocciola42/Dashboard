@@ -11,7 +11,8 @@ import {
   yearSeriesQuarterlyMap,
   todayIndex,
 } from '@/lib/fiscal';
-import { chartRevFatt, legchips } from '@/lib/charts';
+import { legchips } from '@/lib/charts';
+import { chartBillingGap } from '@/lib/chartsInsight';
 import { Html } from '../Html';
 import { ChartCard, CopyTableButton } from '../export/ExportControls';
 
@@ -87,6 +88,7 @@ function TimelinePanel({
   const upto = today < 0 ? 0 : today + 1;
   const matR = rev.slice(0, upto).reduce((x, y) => x + y, 0);
   const modeTxt = tlMode === 'trim' ? 'trimestrale' : 'mensile';
+  const billedName = hasBef ? 'Fatturato emesso (BEF)' : 'Fatturazione';
   const calTxt = cal === 'solare' ? 'anno solare' : 'anno fiscale';
 
   const stats: [string, string, string][] = [
@@ -144,15 +146,15 @@ function TimelinePanel({
         </div>
       </div>
       <ChartCard
-        title={`Revenue vs Fatturazione — ${modeTxt} · ${calTxt} ${periodLabel}`}
+        title={`Quanto resta da fatturare — ${modeTxt} · ${calTxt} ${periodLabel}`}
         caption={
-          'Barre: valori per periodo · Linee: cumulati · solo fornitore Intellera Consulting' +
+          'Cumulati su un solo asse · area gialla = revenue maturata non ancora fatturata · solo fornitore Intellera Consulting' +
           (hasBef ? ` · Fatturato BEF ${calTxt} ${periodLabel}: ${EUR2(totBef)}` : '')
         }
         filename={`Revenue_vs_Fatturazione_${periodLabel}`}
       >
         <Html
-          ariaLabel={`Revenue vs fatturazione (${modeTxt}, ${calTxt} ${periodLabel}). Revenue totale ${EUR(totR)}, fatturazione totale ${EUR(totF)}${
+          ariaLabel={`Revenue cumulata contro ${billedName.toLowerCase()} cumulato (${modeTxt}, ${calTxt} ${periodLabel}). Revenue totale ${EUR(totR)}, fatturazione totale ${EUR(totF)}${
             hasBef ? `, fatturato BEF totale ${EUR(totBef)}` : ''
           }. Per periodo: ${labels
             .map(
@@ -162,17 +164,24 @@ function TimelinePanel({
                 }`,
             )
             .join('; ')}.`}
-          html={chartRevFatt(labels, rev, fatt, bef, today, periodLabel)}
+          html={chartBillingGap({
+            labels,
+            revenue: rev,
+            billed: hasBef ? bef : fatt,
+            billedName,
+            planBilled: hasBef ? fatt : undefined,
+            lastActual: today,
+            todayLabel: today >= 0 && today < labels.length - 1 ? 'oggi' : undefined,
+            periodLabel,
+          })}
         />
         <Html
           className="legrow"
           html={legchips([
-            { c: C.petrol, t: 'Revenue' },
-            { c: C.gold, t: 'Fatturazione' },
-            ...(hasBef ? [{ c: C.slate, t: 'Fatturato (BEF)' }] : []),
-            { c: C.petrolD, t: 'Cum. Revenue', line: true },
-            { c: C.amberD, t: 'Cum. Fatturazione', dash: true },
-            ...(hasBef ? [{ c: C.slate, t: 'Cum. Fatturato (BEF)', dash: true }] : []),
+            { c: C.petrol, t: 'Revenue maturata (cum.)', line: true },
+            { c: C.amberD, t: `${billedName} (cum.)`, line: true },
+            ...(hasBef ? [{ c: C.slate, t: 'Fatturazione a piano (cum.)', dash: true }] : []),
+            { c: C.gold, t: 'Da fatturare' },
           ])}
         />
       </ChartCard>

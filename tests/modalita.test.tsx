@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import ModalitaPanel from '@/components/panels/ModalitaPanel';
 import ModalitaTable from '@/components/panels/modalita/ModalitaTable';
-import { buildModalitaBars, buildModalitaDonut } from '@/components/panels/modalita/modalitaHtml';
+import { buildModalitaShare } from '@/components/panels/modalita/modalitaHtml';
 import { ALTRO_KEY, BUCKET_ORDER, aggregateModalita, modalitaKey } from '@/lib/modalita';
 import { makeIf } from './helpers/fixtures';
 
@@ -64,17 +64,16 @@ describe('aggregateModalita', () => {
 });
 
 describe('chart builders', () => {
-  it('show the empty states without data', () => {
-    expect(buildModalitaDonut([], 1)).toContain('Nessun dato');
-    expect(buildModalitaBars([])).toBe('');
+  it('show the empty state without data', () => {
+    expect(buildModalitaShare([])).toContain('Nessun dato');
   });
 
-  it('bars carry the drill-down label of each modalità', () => {
+  it('share bars carry the drill-down label of each modalità', () => {
     const { rows } = aggregateModalita(IFs);
-    const bars = buildModalitaBars(rows);
-    expect(bars).toContain('data-drill-mod="A corpo"');
-    expect(bars).toContain('data-drill-mod="A canone"');
-    expect(bars).toContain('data-drill-mod="Misto / Altro"');
+    const share = buildModalitaShare(rows);
+    expect(share).toContain('data-drill-mod="A corpo"');
+    expect(share).toContain('data-drill-mod="A canone"');
+    expect(share).toContain('data-drill-mod="Misto / Altro"');
   });
 });
 

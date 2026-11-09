@@ -5,22 +5,26 @@ import { formatTariffa } from '@/lib/distribuzione';
 import type { Seniority } from '@/lib/types';
 import { Html } from '../../Html';
 import { ChartCard, CopyTableButton } from '../../export/ExportControls';
-import { buildSenDonut } from './distribuzioneHtml';
+import { buildSenBars } from './distribuzioneHtml';
 
 // 4c — per seniority.
 export default function SeniorityTab({ seniority, active }: { seniority: Seniority[]; active: boolean }) {
   const senTblRef = useRef<HTMLDivElement>(null);
-  const senDonut = buildSenDonut(seniority);
+  const senBars = buildSenBars(seniority);
   return (
   <div className={'subpanel' + (active ? ' on' : '')}>
-    <div className="grid2">
-      <ChartCard
-        title="GG/Uomo per figura professionale"
-        caption="Giornate/uomo pianificate · intero portafoglio"
-        filename="GG_uomo_per_figura"
-      >
-        <Html html={senDonut} />
-      </ChartCard>
+    <ChartCard
+      title="Dove si concentra lo sforzo e quanto costa?"
+      caption="Giornate/uomo pianificate per figura, con tariffa e costo (GG × tariffa) · intero portafoglio"
+      filename="GG_uomo_per_figura"
+    >
+      <Html
+        ariaLabel={`Giornate uomo per figura professionale. ${seniority
+          .map((s) => `${s.figura} ${EUR0(s.gg)} GG`)
+          .join('; ')}.`}
+        html={senBars}
+      />
+    </ChartCard>
       <div className="tablecard">
         <div className="tbar">
           <h3>Figure professionali e tariffe</h3>
@@ -53,7 +57,6 @@ export default function SeniorityTab({ seniority, active }: { seniority: Seniori
           </table>
         </div>
       </div>
-    </div>
   </div>
   );
 }

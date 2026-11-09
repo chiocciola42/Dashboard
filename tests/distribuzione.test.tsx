@@ -3,7 +3,7 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import DistribuzionePanel from '@/components/panels/DistribuzionePanel';
-import { buildAmbCount, buildAmbVal, buildRefStack, buildSenDonut, PAL } from '@/components/panels/distribuzione/distribuzioneHtml';
+import { buildAmbPareto, buildRefStack, buildSenBars } from '@/components/panels/distribuzione/distribuzioneHtml';
 import {
   NON_CLASSIFICATO,
   NO_REFERENTE,
@@ -75,29 +75,23 @@ describe('totals and formatting', () => {
 
 describe('chart builders', () => {
   it('empty states', () => {
-    expect(buildAmbCount([])).toContain('Nessun IF in questa vista');
-    expect(buildAmbVal([])).toContain('Nessun IF');
+    expect(buildAmbPareto([])).toContain('Nessun dato');
     expect(buildRefStack([])).toContain('Nessun IF');
-    expect(buildSenDonut([])).toContain('Nessun dato');
+    expect(buildSenBars([])).toContain('Nessun dato');
   });
 
-  it('long labels are truncated with an ellipsis', () => {
+  it('long ambito labels are truncated with an ellipsis; the tooltip keeps the full name', () => {
     const long = 'X'.repeat(60);
-    const html = buildAmbCount([[long, { v: 1, n: 1 }]]);
-    // visible label is cut to 34 chars (33 + ellipsis); the tooltip keeps the full name
-    expect(html).toContain('>' + 'X'.repeat(33) + '…</div>');
+    const html = buildAmbPareto([[long, { v: 1, n: 1 }]]);
+    expect(html).toContain('>' + 'X'.repeat(29) + '…</text>');
     expect(html).toContain('data-tip="' + long);
   });
 
-  it('seniority donut cycles the palette when there are more figures than colors', () => {
-    const many = Array.from({ length: PAL.length + 3 }, (_, i) => ({ figura: `F${i}`, code: `C${i}`, gg: i + 1, tariffa: null }));
-    expect(() => buildSenDonut(many)).not.toThrow();
-    expect(buildSenDonut(many)).toContain(PAL[0]);
-  });
-
-  it('seniority tooltip shows the tariff only when there is one', () => {
-    const html = buildSenDonut(sen);
-    expect(html).toContain('450,50');
+  it('seniority bars show the tariff and the cost only when there is a tariff', () => {
+    const html = buildSenBars(sen);
+    expect(html).toContain('450');
+    const noTariff = buildSenBars([{ figura: 'Jr', code: 'J', gg: 10, tariffa: null }]);
+    expect(noTariff).not.toContain('Costo €');
   });
 });
 
