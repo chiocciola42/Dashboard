@@ -298,11 +298,32 @@ export const FORMULA_CATALOG: FormulaRow[] = [
   {
     pagina: '3 Timeline',
     sezione: 'Serie Revenue vs Fatturazione',
-    elemento: 'Da fatturare ad oggi (area gialla)',
-    formula: 'Σ revenue[0..t] − Σ fatturato[0..t]  (fatturato = BEF emesso se presente, altrimenti fatturazione a piano)',
+    elemento: 'Fatturabile reale (linea gialla)',
+    formula:
+      'fatturabile[m] = Σ importo_ricezione delle righe BEF Intellera con mese(periodo_competenza) = m, qualunque sia lo stato della fattura; cumulato dei periodi trascorsi',
     spiegazione:
-      'Revenue maturata fino al periodo corrente t e non ancora fatturata: distanza fra la curva revenue cumulata e quella del fatturato di riferimento.',
-    sorgenti: 'intervento_mesi.revenue, bef_records.importo_ricezione, intervento_mesi.consuntivo',
+      'Quando il lavoro è diventato davvero fatturabile: ogni riga BEF è collocata nel mese del suo periodo di competenza (formati letti: AAAA-MM, MM/AAAA, nome del mese e anno). Le righe senza periodo leggibile non compaiono nella linea e sono dichiarate sotto il grafico. Se la serie è vuota il grafico torna al confronto revenue / fatturato.',
+    sorgenti: 'bef_records.importo_ricezione, bef_records.periodo_competenza (Intellera)',
+  },
+  {
+    pagina: '3 Timeline',
+    sezione: 'Serie Revenue vs Fatturazione',
+    elemento: 'Scarti fra revenue, fatturabile e fatturato (aree)',
+    formula:
+      'non ancora fatturabile = cumRevenue − cumFatturabile; fatturabile non fatturato = cumFatturabile − cumFatturatoEmesso (al periodo corrente)',
+    spiegazione:
+      'Area petrolio: revenue maturata non ancora fatturabile. Area gialla: fatturabile non ancora fatturato. Senza la serie del fatturabile l’unica area è «da fatturare» = cumRevenue − cumFatturato.',
+    sorgenti: 'intervento_mesi.revenue, bef_records.importo_ricezione',
+  },
+  {
+    pagina: '3 Timeline',
+    sezione: 'Serie Revenue vs Fatturazione',
+    elemento: 'Ritardo revenue → fattura (mesi)',
+    formula:
+      'ritardo = (periodo corrente − posizione in cui cumRevenue raggiunge cumFatturatoEmesso) × mesi per periodo (1 mensile, 3 trimestrale)',
+    spiegazione:
+      'Quanto tempo fa la revenue maturata aveva già raggiunto il valore oggi fatturato (interpolazione lineare fra due periodi). Non mostrato se non misurabile (nulla fatturato o fatturato già sotto il primo periodo); 0 se il fatturato ha raggiunto la revenue.',
+    sorgenti: 'intervento_mesi.revenue, bef_records.data_fattura',
   },
   {
     pagina: '3 Timeline',

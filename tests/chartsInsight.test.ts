@@ -11,6 +11,9 @@ import {
 } from '@/lib/chartKit';
 import {
   chartBillingGap,
+  crossingPosition,
+  hasBillableSeries,
+  lagMonths,
   chartFunnel,
   chartPareto,
   chartReferenti,
@@ -128,34 +131,99 @@ describe('chartRevenuePace', () => {
   });
 });
 
+describe('lag helpers', () => {
+  const cum = [100, 200, 300, 400]; // revenue cumulata per periodo
+
+  it('crossingPosition interpolates where the revenue had reached the value', () => {
+    expect(crossingPosition(cum, 250, 3)).toBeCloseTo(1.5);
+    expect(crossingPosition(cum, 300, 3)).toBeCloseTo(2);
+  });
+
+  it('is null when not measurable and equal to `last` when the value reached the revenue', () => {
+    expect(crossingPosition(cum, 0, 3)).toBeNull();
+    expect(crossingPosition(cum, 50, 3)).toBeNull(); // già sotto il primo periodo
+    expect(crossingPosition(cum, 999, 3)).toBe(3);
+    expect(crossingPosition(cum, 250, -1)).toBeNull();
+    expect(crossingPosition(cum, 250, 9)).toBeNull();
+  });
+
+  it('lagMonths converts periods to months and never goes negative', () => {
+    expect(lagMonths(cum, 250, 3)).toBeCloseTo(1.5);
+    expect(lagMonths(cum, 250, 3, 3)).toBeCloseTo(4.5); // trimestri
+    expect(lagMonths(cum, 999, 3)).toBe(0);
+    expect(lagMonths(cum, 0, 3)).toBeNull();
+  });
+
+  it('hasBillableSeries needs at least one positive value', () => {
+    expect(hasBillableSeries(null)).toBe(false);
+    expect(hasBillableSeries([0, 0])).toBe(false);
+    expect(hasBillableSeries([0, 2])).toBe(true);
+  });
+});
+
 describe('chartBillingGap', () => {
   const base = { labels: L3, revenue: [100, 100, 100], billed: [60, 50, 0], billedName: 'Fatturato emesso (BEF)', periodLabel: '2031' };
 
-  it('shows the amount still to invoice at the last elapsed period', () => {
+  it('without the fatturabile series it keeps the revenue vs invoiced comparison', () => {
     const html = chartBillingGap({ ...base, lastActual: 1, todayLabel: 'oggi' });
     expect(html).toContain('Da fatturare ad oggi');
     expect(html).toContain('€ 90'); // 200 maturata - 110 fatturata
-    expect(html).toContain('da fatturare');
     expect(html).toContain('>oggi<');
+    expect(html).not.toContain('Fatturabile reale');
     expect(count(html, 'class="seg"')).toBe(3);
   });
 
-  it('draws the planned invoicing as a dashed third line only when provided', () => {
+  it('with the fatturabile series it draws the third line, both gaps and the lag', () => {
+    const html = chartBillingGap({ ...base, billable: [90, 80, 0], lastActual: 1, todayLabel: 'oggi' });
+    expect(html).toContain('Fatturabile reale € 170');
+    expect(html).toContain('Revenue non ancora fatturabile');
+    expect(html).toContain('€ 30'); // 200 - 170
+    expect(html).toContain('Fatturabile non ancora fatturato');
+    expect(html).toContain('€ 60'); // 170 - 110
+    expect(html).toContain('Ritardo revenue → fattura');
+    expect(html).toContain('mesi di ritardo');
+    expect(html).toContain('Fatturabile reale: € 90');
+    expect(html).not.toContain('NaN');
+  });
+
+  it('the lag is expressed in months also for quarterly periods', () => {
+    const html = chartBillingGap({ ...base, billable: [90, 80, 0], lastActual: 1, monthsPerPeriod: 3 });
+    expect(html).toMatch(/≈ \d+,\d mesi di ritardo/);
+  });
+
+  it('an all-zero fatturabile series is treated as absent', () => {
+    expect(chartBillingGap({ ...base, billable: [0, 0, 0], lastActual: 1 })).not.toContain('Fatturabile reale');
+  });
+
+  it('planned invoicing is a dashed line without the fatturabile series and only a tooltip line with it', () => {
+    const plan = { planBilled: [70, 70, 0] };
     const without = chartBillingGap({ ...base, lastActual: 1 });
-    const withPlan = chartBillingGap({ ...base, lastActual: 1, planBilled: [70, 70, 0] });
-    expect(count(withPlan, 'stroke-dasharray="6 4"')).toBe(count(without, 'stroke-dasharray="6 4"') + 1);
+    const alone = chartBillingGap({ ...base, ...plan, lastActual: 1 });
+    expect(count(alone, 'stroke-dasharray="6 4"')).toBe(count(without, 'stroke-dasharray="6 4"') + 1);
+    const withF = chartBillingGap({ ...base, ...plan, billable: [90, 80, 0], lastActual: 1 });
+    expect(count(withF, 'stroke-dasharray="6 4"')).toBe(count(without, 'stroke-dasharray="6 4"'));
+    expect(withF).toContain('Fatturazione a piano: € 70');
   });
 
   it('a future period range shows only revenue and a hover note', () => {
-    const html = chartBillingGap({ ...base, lastActual: -1 });
+    const html = chartBillingGap({ ...base, billable: [1, 1, 1], lastActual: -1 });
     expect(html).not.toContain('Da fatturare ad oggi');
+    expect(html).not.toContain('Ritardo revenue');
     expect(html).toContain('periodo non ancora trascorso');
+  });
+
+  it('invoiced above fatturabile (periods without a readable competence) does not twist the areas', () => {
+    const html = chartBillingGap({ ...base, billable: [10, 10, 0], lastActual: 1 });
+    expect(html).not.toContain('NaN');
+    expect(html).toContain('Fatturabile non ancora fatturato');
   });
 
   it('validates its input', () => {
     expect(chartBillingGap({ labels: [], revenue: [], billed: [], billedName: 'x', lastActual: -1 })).toContain('Nessun dato');
     expect(() => chartBillingGap({ ...base, billed: [1], lastActual: 0 })).toThrow(ChartInputError);
     expect(() => chartBillingGap({ ...base, planBilled: [1], lastActual: 0 })).toThrow(ChartInputError);
+    expect(() => chartBillingGap({ ...base, billable: [1], lastActual: 0 })).toThrow(ChartInputError);
+    expect(() => chartBillingGap({ ...base, billable: [1, NaN, 1], lastActual: 0 })).toThrow(ChartInputError);
   });
 });
 

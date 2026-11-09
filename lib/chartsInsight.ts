@@ -171,18 +171,23 @@ export function chartRevenuePace(inp: PaceInput): string {
 }
 
 // ---------------------------------------------------------------------------
-// P2 — Quanto lavoro è maturato ma non ancora fatturato?
-// Tre cumulati su un solo asse e l'area "da fatturare" fra revenue e fatturato.
+// P2 — Quanto tempo passa fra revenue maturata, fatturabile e fattura emessa?
+// Tre cumulati su un solo asse: revenue (competenza di piano), fatturabile reale
+// (BEF nel mese del periodo di competenza) e fatturato emesso (BEF nel mese della
+// fattura). Due aree misurano gli scarti, un connettore il ritardo in mesi.
+// Senza la serie del fatturabile il grafico torna al confronto revenue / fatturato.
 // ---------------------------------------------------------------------------
 export type BillingGapInput = {
   labels: readonly string[];
   revenue: readonly number[];
   billed: readonly number[]; // fatturato di riferimento (BEF emesso, o fatturazione a piano)
   billedName: string;
-  planBilled?: readonly number[]; // fatturazione a piano, tratteggiata, se distinta da `billed`
+  billable?: readonly number[] | null; // fatturabile reale per periodo di competenza (BEF)
+  planBilled?: readonly number[]; // fatturazione a piano: linea tratteggiata, o solo tooltip se c'è `billable`
   lastActual: number; // -1 nessun periodo trascorso
   periodLabel?: string;
   todayLabel?: string;
+  monthsPerPeriod?: number; // 1 = mensile, 3 = trimestrale: converte il ritardo in mesi
 };
 
 function validateGap(inp: BillingGapInput): void {
@@ -190,30 +195,130 @@ function validateGap(inp: BillingGapInput): void {
   assertSameLength('revenue', inp.revenue, inp.labels);
   assertSameLength('billed', inp.billed, inp.labels);
   if (inp.planBilled) assertSameLength('planBilled', inp.planBilled, inp.labels);
+  if (inp.billable) assertSameLength('billable', inp.billable, inp.labels);
   assertFinite('revenue', inp.revenue);
   assertFinite('billed', inp.billed);
   assertFinite('planBilled', inp.planBilled || []);
+  assertFinite('billable', inp.billable || []);
+  assertFinite('monthsPerPeriod', [inp.monthsPerPeriod ?? 1]);
 }
 
-function gapArea(x: (i: number) => number, y: (v: number) => number, upper: number[], lower: number[]): string {
-  const up = upper.map((v, i) => [x(i), y(v)] as const);
-  const lo = lower.map((v, i) => [x(i), y(v)] as const).reverse();
-  return svgPath(`${pathD(up)} L${pathD(lo).slice(1)} Z`, { fill: C.gold, opacity: 0.3 });
+// Serie "fatturabile" utilizzabile: presente e con almeno un valore > 0.
+export function hasBillableSeries(billable: readonly number[] | null | undefined): billable is readonly number[] {
+  return !!billable && billable.some((v) => v > 0);
 }
 
-function gapHover(inp: BillingGapInput, x: (i: number) => number, cums: { r: number[]; b: number[] }, w: number, top: number, h: number, last: number): string {
+// Posizione (in periodi, frazionaria) in cui la revenue cumulata aveva raggiunto `value`,
+// e da quanti periodi `last` è oltre quel punto. null se non misurabile (nulla da
+// confrontare o valore già sotto il primo periodo); 0 se il valore ha raggiunto la revenue.
+export function crossingPosition(cumRevenue: readonly number[], value: number, last: number): number | null {
+  if (last < 0 || last >= cumRevenue.length || !(value > 0)) return null;
+  if (value >= cumRevenue[last]) return last;
+  if (value <= cumRevenue[0]) return null;
+  for (let i = 1; i <= last; i++) {
+    if (cumRevenue[i] < value) continue;
+    const span = cumRevenue[i] - cumRevenue[i - 1];
+    return i - 1 + (span > 0 ? (value - cumRevenue[i - 1]) / span : 0);
+  }
+  return last;
+}
+
+export function lagMonths(cumRevenue: readonly number[], value: number, last: number, monthsPerPeriod = 1): number | null {
+  const pos = crossingPosition(cumRevenue, value, last);
+  return pos == null ? null : Math.max(0, last - pos) * monthsPerPeriod;
+}
+
+const IT1 = (n: number): string => n.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+type GapSeries = { last: number; cumR: number[]; cumF: number[] | null; cumB: number[]; cumP: number[] };
+
+function gapSeries(inp: BillingGapInput): GapSeries {
+  const last = Math.min(inp.lastActual, inp.labels.length - 1);
+  const upTo = (a: readonly number[]): number[] => (last >= 0 ? cumulative(a.slice(0, last + 1)) : []);
+  return {
+    last,
+    cumR: cumulative(inp.revenue),
+    cumF: hasBillableSeries(inp.billable) ? upTo(inp.billable) : null,
+    cumB: upTo(inp.billed),
+    cumP: inp.planBilled ? upTo(inp.planBilled) : [],
+  };
+}
+
+// Area fra due curve: sopra/sotto sono scelti punto per punto, così non si accavalla se si incrociano.
+function gapArea(x: (i: number) => number, y: (v: number) => number, a: number[], b: number[], fill: string, opacity: number): string {
+  const up = a.map((v, i) => [x(i), y(Math.max(v, b[i]))] as const);
+  const lo = a.map((v, i) => [x(i), y(Math.min(v, b[i]))] as const).reverse();
+  return svgPath(`${pathD(up)} L${pathD(lo).slice(1)} Z`, { fill, opacity });
+}
+
+function gapHover(inp: BillingGapInput, g: GapSeries, x: (i: number) => number, w: number, top: number, h: number): string {
   const n = inp.labels.length;
   const per = inp.periodLabel ? ` ${inp.periodLabel}` : '';
   let out = '';
   for (let i = 0; i < n; i++) {
-    const hasB = i <= last;
-    const tip =
-      `${inp.labels[i]}${per}\nRevenue: ${EUR(inp.revenue[i])} (cum. ${EUR(cums.r[i])})\n` +
-      (hasB
-        ? `${inp.billedName}: ${EUR(inp.billed[i])} (cum. ${EUR(cums.b[i])})\nDa fatturare (cum.): ${EUR(cums.r[i] - cums.b[i])}`
-        : `${inp.billedName}: periodo non ancora trascorso`);
+    const done = i <= g.last;
+    let tip = `${inp.labels[i]}${per}\nRevenue: ${EUR(inp.revenue[i])} (cum. ${EUR(g.cumR[i])})`;
+    if (!done) tip += '\nperiodo non ancora trascorso';
+    else {
+      if (g.cumF && inp.billable) tip += `\nFatturabile reale: ${EUR(inp.billable[i])} (cum. ${EUR(g.cumF[i])})`;
+      tip += `\n${inp.billedName}: ${EUR(inp.billed[i])} (cum. ${EUR(g.cumB[i])})`;
+      if (inp.planBilled) tip += `\nFatturazione a piano: ${EUR(inp.planBilled[i])} (cum. ${EUR(g.cumP[i])})`;
+      tip += `\nDa fatturare (cum.): ${EUR(g.cumR[i] - g.cumB[i])}`;
+    }
     out += svgRect(x(i) - w / 2, top, w, h, 'transparent', 0, `style="pointer-events:all"${tipAttr(tip)}`);
   }
+  return out;
+}
+
+type GapGeom = { x: (i: number) => number; y: (v: number) => number; W: number; pr: number; pt: number; pb: number };
+
+function gapSummary(inp: BillingGapInput, g: GapSeries, c: GapGeom): string {
+  const bx = c.W - c.pr + 12;
+  const fmtLag = (m: number | null): string => (m == null ? '—' : `${IT1(m)} mesi`);
+  const cumB = g.cumB[g.last];
+  const blocks: [string, string][] = [];
+  if (g.cumF) {
+    blocks.push(['Revenue non ancora fatturabile', eurCompact(g.cumR[g.last] - g.cumF[g.last])]);
+    blocks.push(['Fatturabile non ancora fatturato', eurCompact(g.cumF[g.last] - cumB)]);
+  } else {
+    blocks.push(['Da fatturare ad oggi', eurCompact(g.cumR[g.last] - cumB)]);
+  }
+  blocks.push(['Ritardo revenue → fattura', fmtLag(lagMonths(g.cumR, cumB, g.last, inp.monthsPerPeriod ?? 1))]);
+  const step = 50;
+  let out = '';
+  blocks.forEach(([label, value], i) => {
+    const y0 = c.pb - 20 - (blocks.length - 1 - i) * step - 24;
+    out += svgText(bx, y0, label, { fill: C.muted, size: 10.5 });
+    out += svgText(bx, y0 + 21, value, { fill: C.ink, weight: 800, size: 17 });
+  });
+  return out;
+}
+
+function gapLag(inp: BillingGapInput, g: GapSeries, c: GapGeom): string {
+  const cumB = g.cumB[g.last];
+  const pos = crossingPosition(g.cumR, cumB, g.last);
+  if (pos == null || g.last - pos <= 0) return '';
+  const months = (g.last - pos) * (inp.monthsPerPeriod ?? 1);
+  const ye = c.y(cumB);
+  const xs = c.x(pos);
+  const xe = c.x(g.last);
+  let out = svgLine(xs, ye, xe, ye, C.ink, 1.4, '2 3') + svgLine(xs, ye - 5, xs, ye + 5, C.ink, 1.4);
+  out += svgText((xs + xe) / 2, ye + 18, `≈ ${IT1(months)} mesi di ritardo`, { anchor: 'middle', fill: C.ink, weight: 700, size: 11, extra: HALO });
+  return out;
+}
+
+function gapEndLabels(inp: BillingGapInput, g: GapSeries, c: GapGeom): string {
+  const n = inp.labels.length;
+  let out = svgText(c.x(n - 1) + 10, c.y(g.cumR[n - 1]) + 4, `Revenue ${eurCompact(g.cumR[n - 1])}`, { fill: C.ink, weight: 700, size: 11.5 });
+  if (g.last < 0) return out;
+  const xl = c.x(g.last) + 10;
+  out += svgCircle(c.x(g.last), c.y(g.cumR[g.last]), 5, C.petrol);
+  if (g.cumF) {
+    out += svgCircle(c.x(g.last), c.y(g.cumF[g.last]), 5, C.gold);
+    out += svgText(xl, c.y(g.cumF[g.last]) - 8, `Fatturabile reale ${eurCompact(g.cumF[g.last])}`, { fill: C.ink, weight: 700, size: 11.5 });
+  }
+  out += svgCircle(c.x(g.last), c.y(g.cumB[g.last]), 5, C.amberD);
+  out += svgText(xl, c.y(g.cumB[g.last]) + (g.cumF ? 14 : 4), `${inp.billedName} ${eurCompact(g.cumB[g.last])}`, { fill: C.amberD, weight: 700, size: 11.5 });
   return out;
 }
 
@@ -222,76 +327,39 @@ export function chartBillingGap(inp: BillingGapInput): string {
   const n = inp.labels.length;
   if (n === 0) return EMPTY('Nessun dato');
   const W = 920;
-  const H = 380;
+  const H = 400;
   const pl = 78;
-  const pr = 180;
+  const pr = 200;
   const pt = 16;
   const pb = 32;
   const h = H - pt - pb;
-  const last = Math.min(inp.lastActual, n - 1);
+  const g = gapSeries(inp);
   const x = linearScale(0, Math.max(1, n - 1), pl + 20, W - pr - 20);
-  const cumR = cumulative(inp.revenue);
-  const cumB = last >= 0 ? cumulative(inp.billed.slice(0, last + 1)) : [];
-  const cumP = inp.planBilled && last >= 0 ? cumulative(inp.planBilled.slice(0, last + 1)) : [];
-  const max = niceCeil(Math.max(cumR[n - 1] || 0, cumB[last] || 0, cumP[last] || 0));
+  const max = niceCeil(Math.max(g.cumR[n - 1] || 0, g.cumB[g.last] || 0, g.cumP[g.last] || 0, g.cumF ? g.cumF[g.last] : 0));
   const y = linearScale(0, max, pt + h, pt);
-  let out = hGrid(pl, W - pr, y, max, 4, eurCompact, { line: C.line, text: C.muted });
+  const c: GapGeom = { x, y, W, pr, pt, pb: pt + h };
+  const line = (a: number[], stroke: string, width: number, dash?: string): string =>
+    svgPath(pathD(a.map((v, i) => [x(i), y(v)] as const)), { stroke, width, dash });
+  let out = hGrid(pl, W - pr, y, max, 5, eurCompact, { line: C.line, text: C.muted });
   for (let i = 0; i < n; i++) out += svgText(x(i), H - 10, inp.labels[i], { anchor: 'middle', fill: C.muted, size: 11 });
-  if (last >= 0) out += gapArea(x, y, cumR.slice(0, last + 1), cumB);
-  out += svgPath(pathD(cumR.map((v, i) => [x(i), y(v)] as const)), { stroke: C.petrol, width: 3 });
-  if (cumP.length) out += svgPath(pathD(cumP.map((v, i) => [x(i), y(v)] as const)), { stroke: C.slate, width: 2.2, dash: '6 4' });
-  if (cumB.length) out += svgPath(pathD(cumB.map((v, i) => [x(i), y(v)] as const)), { stroke: C.amberD, width: 2.6 });
-  if (last >= 0 && inp.todayLabel) {
-    out += svgLine(x(last), pt, x(last), pt + h, C.amberD, 1.2, '4 3');
-    out += svgText(x(last) + 5, pt + 12, inp.todayLabel, { fill: C.amberD, weight: 700, size: 10 });
+  if (g.last >= 0) {
+    const revToDate = g.cumR.slice(0, g.last + 1);
+    out += g.cumF
+      ? gapArea(x, y, revToDate, g.cumF, C.petrol, 0.14) + gapArea(x, y, g.cumF, g.cumB, C.gold, 0.38)
+      : gapArea(x, y, revToDate, g.cumB, C.gold, 0.3);
   }
-  out += gapLabels(inp, { x, y, W, pr, pt, pb: pt + h, last, cumR, cumB });
-  const slot = (W - pl - pr) / Math.max(1, n - 1);
-  out += gapHover(inp, x, { r: cumR, b: cumB }, slot, pt, h, last);
+  out += line(g.cumR, C.petrol, 3);
+  if (g.cumP.length && !g.cumF) out += line(g.cumP, C.slate, 2.2, '6 4');
+  if (g.cumF) out += line(g.cumF, C.gold, 3);
+  if (g.cumB.length) out += line(g.cumB, C.amberD, 3);
+  if (g.last >= 0 && inp.todayLabel) {
+    out += svgLine(x(g.last), pt, x(g.last), pt + h, C.amberD, 1.2, '4 3');
+    out += svgText(x(g.last) + 5, pt + 12, inp.todayLabel, { fill: C.amberD, weight: 700, size: 10 });
+  }
+  if (g.last >= 0) out += gapLag(inp, g, c) + gapSummary(inp, g, c);
+  out += gapEndLabels(inp, g, c);
+  out += gapHover(inp, g, x, (W - pl - pr) / Math.max(1, n - 1), pt, h);
   return svgWrap(W, H, out);
-}
-
-type GapLabelCtx = {
-  x: (i: number) => number;
-  y: (v: number) => number;
-  W: number;
-  pr: number;
-  pt: number;
-  pb: number; // ordinata della base del grafico
-  last: number;
-  cumR: number[];
-  cumB: number[];
-};
-
-function gapLabels(inp: BillingGapInput, c: GapLabelCtx): string {
-  const n = inp.labels.length;
-  let out = svgText(c.x(n - 1) + 10, c.y(c.cumR[n - 1]) + 4, `Revenue ${eurCompact(c.cumR[n - 1])}`, {
-    fill: C.ink,
-    weight: 700,
-    size: 11.5,
-  });
-  if (c.last < 0) return out;
-  out += svgCircle(c.x(c.last), c.y(c.cumB[c.last]), 5, C.amberD);
-  out += svgText(c.x(c.last) + 10, c.y(c.cumB[c.last]) + 4, `${inp.billedName} ${eurCompact(c.cumB[c.last])}`, {
-    fill: C.amberD,
-    weight: 700,
-    size: 11.5,
-  });
-  const gap = c.cumR[c.last] - c.cumB[c.last];
-  const bx = c.W - c.pr + 12;
-  out += svgText(bx, c.pb - 34, 'Da fatturare ad oggi', { fill: C.muted, size: 11 });
-  out += svgText(bx, c.pb - 10, eurCompact(gap), { fill: C.ink, weight: 800, size: 20 });
-  const mid = Math.floor(c.last / 2);
-  if (gap > 0) {
-    out += svgText(c.x(mid), (c.y(c.cumR[mid]) + c.y(c.cumB[mid])) / 2 + 4, 'da fatturare', {
-      anchor: 'middle',
-      fill: C.amberD,
-      weight: 700,
-      size: 11,
-      extra: HALO,
-    });
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@ import { SCHEMA_VERSION } from './db';
 import { listInterventiBase } from './store';
 import { factsToMap, listFacts, overlayMesi, parseAnno, pickDefaultAnno, yearsOf } from './mesiStore';
 import { quotaValFromRti } from './config';
-import { listAllBef, computeBefMonthlyTotals, computeBefAggregates } from './befStore';
+import { listAllBef, computeBefMonthlyTotals, computeBefFatturabileMonthly, computeBefAggregates } from './befStore';
 import { getSettingsBulk } from './settings';
 import { timed } from './perf';
 import { SEED_FORNITORI, SEED_RTI, SEED_META, SEED_SENIORITY, SEED_MODALITA, SEED_TIMELINE } from './seed';
@@ -82,6 +82,7 @@ async function assembleDashboardData(
     timeline,
     timeline_my,
     bef_monthly: computeBefMonthlyTotals(intelleraBef),
+    bef_fatturabile: computeBefFatturabileMonthly(intelleraBef),
     bef_aggregates: computeBefAggregates(intelleraBef),
     kpi: computeKpi(all),
     revenue_mensile: revenueMensile(all, anno),

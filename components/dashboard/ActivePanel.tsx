@@ -63,6 +63,7 @@ export default function ActivePanel(p: ActivePanelProps) {
         <TimelinePanel
           timelineMy={data.timeline_my}
           befMonthly={data.bef_monthly}
+          befFatturabile={data.bef_fatturabile}
           befAggregates={data.bef_aggregates}
           tlMode={p.tlMode}
           setTlMode={p.setTlMode}
