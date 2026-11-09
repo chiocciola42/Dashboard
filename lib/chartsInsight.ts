@@ -2,7 +2,7 @@
 // riferimento (piano, totale iniziale, quota). Builder puri: dati in ingresso, stringa
 // SVG in uscita. Input incoerenti → ChartInputError (errore di programmazione);
 // dati semplicemente assenti → blocco "empty" (caso normale a runtime).
-import { C, EROSION_THRESHOLDS, EUR, PCT, clamp } from './format';
+import { C, EROSION_THRESHOLDS, EUR, FCOL, PCT, clamp } from './format';
 import { esc } from './charts';
 import {
   ChartInputError,
@@ -634,4 +634,138 @@ export function chartRtiBullets(inp: RtiBulletsInput): string {
   const yEnd = top + inp.rows.length * rh;
   out += svgText(pl + (bw * elapsed) / RTI_AXIS_MAX, yEnd + 4, `tempo trascorso ${Math.round(elapsed)}%`, { anchor: 'middle', fill: C.ink, weight: 700, size: 10.5 });
   return svgWrap(W, yEnd + 16, out);
+}
+
+// ---------------------------------------------------------------------------
+// P6 — Come si ripartisce ogni referente fra tutte le aziende dell'RTI,
+// rispetto alle quote contrattuali? Barre al 100% a tutta larghezza.
+// ---------------------------------------------------------------------------
+export type RefSharePartner = { name: string; color: string; pct: number }; // pct: frazione 0..1 della quota
+export type RefShareRow = { label: string; byPartner: Record<string, number>; fuoriRti: number; n: number; tot: number };
+
+const REF_MAX_ROWS = 15;
+const FUORI_LABEL = 'Fuori RTI';
+
+type RefSeg = { name: string; color: string; v: number; quotaPct: number };
+
+// Oltre `max` referenti, gli ultimi confluiscono in «Altri k referenti» (la tabella li elenca tutti).
+export function foldReferenti(rows: readonly RefShareRow[], names: readonly string[], max = REF_MAX_ROWS): RefShareRow[] {
+  if (rows.length <= max) return [...rows];
+  const tail = rows.slice(max - 1);
+  const merged: RefShareRow = {
+    label: `Altri ${tail.length} referenti`,
+    byPartner: Object.fromEntries(names.map((n) => [n, tail.reduce((s, r) => s + (r.byPartner[n] || 0), 0)])),
+    fuoriRti: tail.reduce((s, r) => s + r.fuoriRti, 0),
+    n: tail.reduce((s, r) => s + r.n, 0),
+    tot: tail.reduce((s, r) => s + r.tot, 0),
+  };
+  return [...rows.slice(0, max - 1), merged];
+}
+
+function refSegments(partners: readonly RefSharePartner[], row: RefShareRow): RefSeg[] {
+  const segs = partners.map((p) => ({ name: p.name, color: p.color, v: row.byPartner[p.name] || 0, quotaPct: p.pct * 100 }));
+  return [...segs, { name: FUORI_LABEL, color: FCOL.Altro || C.slateL, v: row.fuoriRti, quotaPct: 0 }];
+}
+
+// Segmento con il maggior scostamento (in punti percentuali) dalla propria quota.
+export function maxDeviation(segs: readonly RefSeg[], tot: number): { name: string; pp: number } | null {
+  if (tot <= 0) return null;
+  let best: { name: string; pp: number } | null = null;
+  for (const s of segs) {
+    const pp = (s.v / tot) * 100 - s.quotaPct;
+    if (!best || Math.abs(pp) > Math.abs(best.pp)) best = { name: s.name, pp };
+  }
+  return best;
+}
+
+const REF_BAR_H = 34;
+
+function refBar(label: string, segs: readonly RefSeg[], tot: number, g: { pl: number; bw: number; y: number }, bold: boolean): string {
+  let out = svgText(g.pl - 10, g.y + REF_BAR_H / 2 + 4, clamp(label, 20), { anchor: 'end', fill: C.ink, weight: bold ? 700 : 500, size: 12.5 });
+  let acc = 0;
+  for (const s of segs) {
+    const share = tot > 0 ? (s.v / tot) * 100 : 0;
+    const w = (g.bw * share) / 100;
+    if (w > 0) {
+      const pp = share - s.quotaPct;
+      const tip = `${label} · ${s.name}\n${EUR(s.v)} · ${PCT(share)} del referente\nQuota contrattuale ${PCT(s.quotaPct)} · scostamento ${pp >= 0 ? '+' : '−'}${Math.abs(pp).toFixed(1)} p.p.`;
+      out += svgRect(g.pl + acc, g.y, Math.max(0, w - 1.5), REF_BAR_H, s.color, 3, tipAttr(tip).trim());
+      if (w > 52) {
+        out += svgText(g.pl + acc + w / 2, g.y + 14, `${Math.round(share)}%`, { anchor: 'middle', fill: '#fff', weight: 700, size: 11.5, extra: 'pointer-events="none"' });
+        out += svgText(g.pl + acc + w / 2, g.y + 27, eurCompact(s.v), { anchor: 'middle', fill: '#fff', size: 10, extra: 'pointer-events="none"' });
+      } else if (w > 22) {
+        out += svgText(g.pl + acc + w / 2, g.y + REF_BAR_H / 2 + 4, `${Math.round(share)}%`, { anchor: 'middle', fill: '#fff', weight: 700, size: 10, extra: 'pointer-events="none"' });
+      }
+    }
+    acc += w;
+  }
+  return out;
+}
+
+function refQuotaBar(partners: readonly RefSharePartner[], g: { pl: number; bw: number; y: number }): string {
+  let out = svgText(g.pl - 10, g.y + REF_BAR_H / 2 + 4, 'Quota contratto', { anchor: 'end', fill: C.ink, weight: 700, size: 12.5 });
+  let acc = 0;
+  for (const p of partners) {
+    const w = g.bw * Math.max(0, p.pct);
+    out += svgRect(g.pl + acc, g.y, Math.max(0, w - 1.5), REF_BAR_H, p.color, 3, 'opacity="0.45"');
+    if (w > 30) out += svgText(g.pl + acc + w / 2, g.y + REF_BAR_H / 2 + 4, `${Math.round(p.pct * 100)}%`, { anchor: 'middle', fill: '#fff', weight: 700, size: 11 });
+    acc += w;
+  }
+  return out;
+}
+
+function refColumns(row: { tot: number; n: number; dev: { name: string; pp: number } | null }, x: { t: number; n: number; d: number }, y: number, bold: boolean): string {
+  let out = svgText(x.t, y, eurCompact(row.tot), { fill: C.ink, weight: 700, size: 13 });
+  out += svgText(x.n, y, String(row.n), { fill: C.ink, weight: bold ? 700 : 400, size: 13 });
+  if (!row.dev) return out;
+  const off = Math.abs(row.dev.pp) >= 10;
+  return out + svgText(x.d, y, `${row.dev.name} ${row.dev.pp >= 0 ? '+' : '−'}${Math.abs(Math.round(row.dev.pp))} p.p.`, { anchor: 'end', fill: off ? C.bad : C.muted, weight: off ? 700 : 400, size: 12 });
+}
+
+export function chartReferenti(partners: readonly RefSharePartner[], allRows: readonly RefShareRow[]): string {
+  assertMaxLen('partners', partners.length, 20);
+  assertMaxLen('rows', allRows.length, 2000);
+  assertFinite('partners', partners.map((p) => p.pct));
+  assertFinite('rows', allRows.flatMap((r) => [...Object.values(r.byPartner), r.fuoriRti, r.n, r.tot]));
+  if (partners.length === 0 || allRows.length === 0) return EMPTY('Nessun IF');
+  const names = partners.map((p) => p.name);
+  const rows = foldReferenti(allRows, names);
+  const W = 1000;
+  const g = { pl: 128, bw: 504, y: 0 };
+  const rh = 46;
+  const top = 40;
+  const x = { t: g.pl + g.bw + 22, n: g.pl + g.bw + 118, d: W - 4 };
+  let out = svgText(g.pl, 16, 'Ripartizione per azienda · quota % e importo', { fill: C.ink, weight: 700, size: 12.5 });
+  out += svgText(x.t, 16, 'Totale', { fill: C.ink, weight: 700, size: 12.5 });
+  out += svgText(x.n, 16, 'N° IF', { fill: C.ink, weight: 700, size: 12.5 });
+  out += svgText(x.d, 16, 'Scostamento max', { anchor: 'end', fill: C.ink, weight: 700, size: 12.5 });
+  const yt = top + (rows.length + 1) * rh + 10;
+  let cum = 0;
+  let guides = '';
+  partners.slice(0, -1).forEach((p) => {
+    cum += p.pct;
+    const lx = g.pl + g.bw * cum;
+    guides += svgLine(lx, top - 4, lx, yt + REF_BAR_H + 4, C.ink, 1, '3 3');
+  });
+  // Le guide stanno dietro le barre: non attraversano etichette e importi.
+  out += guides;
+  out += refQuotaBar(partners, { ...g, y: top });
+  rows.forEach((r, k) => {
+    const y = top + (k + 1) * rh + 4;
+    const segs = refSegments(partners, r);
+    out += refBar(r.label, segs, r.tot, { ...g, y }, false);
+    out += refColumns({ tot: r.tot, n: r.n, dev: maxDeviation(segs, r.tot) }, x, y + REF_BAR_H / 2 + 5, false);
+  });
+  const total: RefShareRow = {
+    label: 'Totale portafoglio',
+    byPartner: Object.fromEntries(names.map((n) => [n, allRows.reduce((s, r) => s + (r.byPartner[n] || 0), 0)])),
+    fuoriRti: allRows.reduce((s, r) => s + r.fuoriRti, 0),
+    n: allRows.reduce((s, r) => s + r.n, 0),
+    tot: allRows.reduce((s, r) => s + r.tot, 0),
+  };
+  out += svgLine(12, yt - 5, W - 4, yt - 5, C.line);
+  const tsegs = refSegments(partners, total);
+  out += refBar(total.label, tsegs, total.tot, { ...g, y: yt }, true);
+  out += refColumns({ tot: total.tot, n: total.n, dev: null }, x, yt + REF_BAR_H / 2 + 5, true);
+  return svgWrap(W, yt + REF_BAR_H + 14, out);
 }

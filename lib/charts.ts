@@ -8,40 +8,6 @@ export const esc = (s: unknown) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string,
   );
 
-export type StackRow = {
-  label: string;
-  total: number;
-  disp: string;
-  sub?: string;
-  segs: { v: number; c: string }[];
-  tip: string;
-};
-
-export function hbarsStacked(rows: StackRow[], opts?: { max?: number }): string {
-  opts = opts || {};
-  const max = opts.max || Math.max(1, ...rows.map((r) => r.total));
-  return (
-    `<div class="hbars">` +
-    rows
-      .map((r) => {
-        const segs = r.segs
-          .filter((s) => s.v > 0)
-          .map(
-            (s) =>
-              `<div class="hsseg" style="width:${((s.v / max) * 100).toFixed(2)}%;background:${s.c}"></div>`,
-          )
-          .join('');
-        return `<div class="hsrow" data-tip="${esc(r.tip)}"><div class="hl" title="${esc(
-          r.label,
-        )}">${esc(r.label)}</div><div class="hstrack">${segs}</div><div class="hval">${esc(r.disp)}${
-          r.sub ? `<span class="hsub">${esc(r.sub)}</span>` : ''
-        }</div></div>`;
-      })
-      .join('') +
-    `</div>`
-  );
-}
-
 export type LegItem = { c: string; t: string; line?: boolean; dash?: boolean };
 export function legchips(items: LegItem[]): string {
   return items

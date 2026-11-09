@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { C } from '@/lib/format';
-import { esc, hbarsStacked, legchips } from '@/lib/charts';
+import { esc, legchips } from '@/lib/charts';
 
 const count = (html: string, needle: string | RegExp) => (html.match(typeof needle === 'string' ? new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g') : needle) ?? []).length;
 
@@ -12,14 +12,6 @@ describe('esc', () => {
     expect(esc(null)).toBe('');
     expect(esc(undefined)).toBe('');
     expect(esc(42)).toBe('42');
-  });
-});
-
-describe('hbarsStacked', () => {
-  it('draws only the positive segments, sized against the max', () => {
-    const html = hbarsStacked([{ label: 'A', total: 10, disp: '10', tip: 't', segs: [{ v: 5, c: '#1' }, { v: 0, c: '#2' }, { v: 5, c: '#3' }] }], { max: 20 });
-    expect(count(html, 'class="hsseg"')).toBe(2);
-    expect(html).toContain('width:25.00%');
   });
 });
 

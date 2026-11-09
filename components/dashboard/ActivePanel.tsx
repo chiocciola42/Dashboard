@@ -69,7 +69,7 @@ export default function ActivePanel(p: ActivePanelProps) {
         />
       );
     case 3:
-      return <DistribuzionePanel IFs={IFs} seniority={data.seniority} distSub={p.distSub} setDistSub={p.setDistSub} />;
+      return <DistribuzionePanel IFs={IFs} seniority={data.seniority} partners={p.rti.partners} distSub={p.distSub} setDistSub={p.setDistSub} />;
     case 4:
       return <ModalitaPanel interventi={IFs} onDrillMod={p.onDrillMod} />;
     case 5:

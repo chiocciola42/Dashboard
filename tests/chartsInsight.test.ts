@@ -13,10 +13,13 @@ import {
   chartBillingGap,
   chartFunnel,
   chartPareto,
+  chartReferenti,
   chartRevenuePace,
   chartSeniority,
   chartShareCompare,
+  foldReferenti,
   foldTail,
+  maxDeviation,
   funnelFromStats,
   hasActualSeries,
   paretoCutoff,
@@ -295,5 +298,75 @@ describe('chartSeniority', () => {
   it('empty or all-zero input gives the empty state', () => {
     expect(chartSeniority([])).toContain('Nessun dato');
     expect(chartSeniority([{ label: 'x', code: 'x', gg: 0, tariffa: 1 }])).toContain('Nessun dato');
+  });
+});
+
+describe('chartReferenti', () => {
+  const partners = [
+    { name: 'Intellera', color: '#111', pct: 0.5 },
+    { name: 'Deloitte', color: '#222', pct: 0.3 },
+    { name: 'Gellify', color: '#333', pct: 0.2 },
+  ];
+  const row = (label: string, i: number, d: number, g: number, f = 0) => ({
+    label, byPartner: { Intellera: i, Deloitte: d, Gellify: g }, fuoriRti: f, n: 2, tot: i + d + g + f,
+  });
+
+  it('draws one segment per company with value, plus the quota bar, the portfolio row and the quota boundaries', () => {
+    const html = chartReferenti(partners, [row('Rossi', 500, 300, 200), row('Bianchi', 100, 100, 800)]);
+    expect(count(html, 'class="seg"')).toBe(3 + 3 + 3); // 2 referenti + portafoglio, 3 segmenti
+    expect(html).toContain('Quota contratto');
+    expect(html).toContain('Totale portafoglio');
+    expect(html).toContain('Gellify');
+    expect(count(html, 'stroke-dasharray="3 3"')).toBe(2); // confini fra 3 aziende
+    expect(html).not.toContain('NaN');
+  });
+
+  it('REGRESSION: every RTI company is drawn, not only Intellera and Deloitte', () => {
+    const five = ['Intellera', 'Deloitte', 'Gellify', 'PGMD', 'Accenture'].map((name, i) => ({ name, color: `#${i}${i}${i}`, pct: 0.2 }));
+    const byPartner = Object.fromEntries(five.map((p) => [p.name, 100]));
+    const html = chartReferenti(five, [{ label: 'Rossi', byPartner, fuoriRti: 0, n: 5, tot: 500 }]);
+    for (const p of five) expect(html).toContain(`Rossi · ${p.name}`);
+  });
+
+  it('suppliers outside the RTI get their own "Fuori RTI" segment, with quota 0', () => {
+    const html = chartReferenti(partners, [row('Rossi', 500, 300, 100, 100)]);
+    expect(html).toContain('Rossi · Fuori RTI');
+    expect(html).toContain('Quota contrattuale 0,0%');
+  });
+
+  it('maxDeviation picks the company furthest from its quota; none without value', () => {
+    const segs = [
+      { name: 'A', color: '#1', v: 80, quotaPct: 50 },
+      { name: 'B', color: '#2', v: 20, quotaPct: 50 },
+    ];
+    expect(maxDeviation(segs, 100)).toEqual({ name: 'A', pp: 30 });
+    expect(maxDeviation(segs, 0)).toBeNull();
+  });
+
+  it('flags in the chart a deviation of 10 points or more', () => {
+    expect(chartReferenti(partners, [row('Rossi', 900, 50, 50)])).toContain('Intellera +40 p.p.');
+  });
+
+  it('foldReferenti bounds the rows and keeps the totals', () => {
+    const rows = Array.from({ length: 30 }, (_, i) => row(`R${i}`, 1, 1, 1));
+    const folded = foldReferenti(rows, ['Intellera', 'Deloitte', 'Gellify']);
+    expect(folded).toHaveLength(15);
+    expect(folded[14].label).toBe('Altri 16 referenti');
+    expect(folded[14].tot).toBe(48);
+    expect(folded.reduce((s, r) => s + r.tot, 0)).toBe(90);
+    expect(foldReferenti(rows.slice(0, 3), ['Intellera'])).toHaveLength(3);
+  });
+
+  it('a referent with zero total draws no segments and no NaN; empty input gives the empty state', () => {
+    const html = chartReferenti(partners, [row('Zero', 0, 0, 0), row('Rossi', 5, 3, 2)]);
+    expect(html).not.toContain('NaN');
+    expect(count(html, 'class="seg"')).toBe(3 + 3);
+    expect(chartReferenti(partners, [])).toContain('Nessun IF');
+    expect(chartReferenti([], [row('Rossi', 1, 1, 1)])).toContain('Nessun IF');
+  });
+
+  it('validates its input and escapes labels', () => {
+    expect(() => chartReferenti(partners, [row('X', NaN, 0, 0)])).toThrow(ChartInputError);
+    expect(chartReferenti(partners, [row('<b>x', 1, 1, 1)])).not.toContain('<b>x');
   });
 });

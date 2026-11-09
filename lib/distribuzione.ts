@@ -6,7 +6,10 @@ export const NON_CLASSIFICATO = 'Non classificato';
 export const NO_REFERENTE = '—';
 
 export type AmbitoAgg = { v: number; n: number };
-export type RefAgg = { Intellera: number; Deloitte: number; Altro: number; n: number; tot: number };
+export const FUORI_RTI = 'Fuori RTI';
+// Valore di un referente per azienda dell'RTI (una chiave per ogni partner configurato,
+// anche a 0) più il valore dei fornitori che non fanno parte dell'RTI.
+export type RefAgg = { byPartner: Record<string, number>; fuoriRti: number; n: number; tot: number };
 
 // Value and IF count per ambito, biggest value first.
 export function aggregateByAmbito(IFs: Intervento[]): [string, AmbitoAgg][] {
@@ -19,16 +22,16 @@ export function aggregateByAmbito(IFs: Intervento[]): [string, AmbitoAgg][] {
   return Object.entries(agg).sort((a, b) => b[1].v - a[1].v);
 }
 
-// Value per ARIA referent split Intellera / Deloitte / other suppliers, biggest
-// total first.
-export function aggregateByReferente(IFs: Intervento[]): [string, RefAgg][] {
+// Value per ARIA referent split across ALL the RTI companies (`partnerNames`, in
+// configuration order) plus "fuori RTI" for any other supplier; biggest total first.
+export function aggregateByReferente(IFs: Intervento[], partnerNames: readonly string[]): [string, RefAgg][] {
+  const known = new Set(partnerNames);
   const agg: Record<string, RefAgg> = {};
   for (const i of IFs) {
     const k = i.ref_aria || NO_REFERENTE;
-    const o = (agg[k] = agg[k] || { Intellera: 0, Deloitte: 0, Altro: 0, n: 0, tot: 0 });
-    if (i.fornitore === 'Intellera') o.Intellera += i.importo;
-    else if (i.fornitore === 'Deloitte') o.Deloitte += i.importo;
-    else o.Altro += i.importo;
+    const o = (agg[k] = agg[k] || { byPartner: Object.fromEntries(partnerNames.map((n) => [n, 0])), fuoriRti: 0, n: 0, tot: 0 });
+    if (known.has(i.fornitore)) o.byPartner[i.fornitore] += i.importo;
+    else o.fuoriRti += i.importo;
     o.tot += i.importo;
     o.n++;
   }
