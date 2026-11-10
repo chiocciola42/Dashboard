@@ -361,6 +361,21 @@ export const gdl_righe = pgTable('gdl_righe', {
   azienda: text('azienda'),
 });
 
+// Costi contrattuali per linea di fornitura dal foglio "Oggetto Fornitura" dell'Aggregatore
+// (lib/fornituraStore.ts): milestone, canone o prestazione a misura di un IF.
+export const fornitura_righe = pgTable('fornitura_righe', {
+  id: serial('id').primaryKey(),
+  numero_if: text('numero_if').notNull(),
+  num_linea: text('num_linea'),
+  modalita: text('modalita'), // corpo | canone | consumo
+  codice: text('codice'), // codice milestone/attività, può mancare
+  descrizione: text('descrizione'),
+  quantita: numeric('quantita', { precision: 14, scale: 4 }),
+  costo_unitario: numeric('costo_unitario', { precision: 18, scale: 6 }),
+  costo_complessivo: numeric('costo_complessivo', { precision: 18, scale: 4 }), // null = mancante
+  fornitore: text('fornitore'),
+});
+
 // Generic JSON settings store (valori di gara, timeline, tariffe globali …).
 export const app_config = pgTable('app_config', {
   key: text('key').primaryKey(),

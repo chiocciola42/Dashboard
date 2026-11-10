@@ -4,6 +4,7 @@ import type {
   VerbaleChiusura,
   Seniority,
   GdlRiga,
+  FornituraRiga,
   ReportBdoRecord,
   ReportRdiRecord,
   VerbaleAperturaRecord,
@@ -54,6 +55,7 @@ export type ParseOutput = {
   chiusura?: VerbaleChiusura[];
   seniority?: Seniority[];
   gdl?: GdlRiga[];
+  fornitura?: FornituraRiga[];
   reportBdo?: ReportBdoRecord[];
   reportRdi?: ReportRdiRecord[];
   verbaliApertura?: VerbaleAperturaRecord[];
@@ -69,6 +71,7 @@ const RECORD_LISTS = [
   'chiusura',
   'seniority',
   'gdl',
+  'fornitura',
   'reportBdo',
   'reportRdi',
   'verbaliApertura',
@@ -102,8 +105,8 @@ export function parseFile(filename: string, buf: ArrayBuffer | Buffer): ParseOut
     case 'chiusura':
       return { kind, chiusura: parseChiusura(buf) };
     case 'aggregatore': {
-      const { seniority, interventi, gdl } = parseAggregatore(buf);
-      return { kind, seniority, interventi, gdl };
+      const { seniority, interventi, gdl, fornitura } = parseAggregatore(buf);
+      return { kind, seniority, interventi, gdl, fornitura };
     }
     case 'dashboard': {
       const { seniority, interventi, mesi } = parseDashboard(buf);

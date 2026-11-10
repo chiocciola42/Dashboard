@@ -3,6 +3,7 @@ import { POST } from '@/app/api/upload/route';
 import { getIfMesi, listFacts } from '@/lib/mesiStore';
 import { createIntervento, getIntervento, listInterventiBase } from '@/lib/store';
 import { listAllGdl } from '@/lib/gdlStore';
+import { listAllFornitura } from '@/lib/fornituraStore';
 import { getSeniority, setSeniority } from '@/lib/portfolio';
 import { workbook } from './helpers/xlsx';
 
@@ -193,6 +194,7 @@ describe('POST /api/upload — GdL and seniority', () => {
     g.__ARIA_MEM__ = [];
     g.__ARIA_MESI__ = new Map();
     delete g.__ARIA_GDL__;
+    delete g.__ARIA_FORN__;
     delete g.__ARIA_CFG__;
   });
 
@@ -241,6 +243,23 @@ describe('POST /api/upload — GdL and seniority', () => {
     expect(body).toMatchObject({ ok: true, kind: 'aggregatore', gdl_saved: 3, seniority_rows: 2 });
     expect((await listAllGdl()).map((r) => r.azienda)).toEqual(['Intellera', 'Intellera', 'Deloitte']);
     expect((await getSeniority()).reduce((t, x) => t + x.gg, 0)).toBe(25);
+  });
+
+  it('cost lines travel too: validated, kept with null for unreadable amounts, replaced per IF', async () => {
+    const linea = (o: Record<string, unknown> = {}) => ({ numero_if: '20260001', num_linea: '1', modalita: 'corpo', codice: 'MLS01', descrizione: 'M', quantita: 1, costo_unitario: 10, costo_complessivo: 10, fornitore: 'Intellera', ...o });
+    const res = await send({ kind: 'aggregatore', fornitura: [linea(), linea({ costo_complessivo: 'abc' }), linea({ costo_complessivo: Number.NaN }), linea({ modalita: 'altro' }), linea({ numero_if: '' }), 'x', null] });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, fornitura_saved: 4 });
+    const rows = await listAllFornitura();
+    expect(rows.map((r) => r.costo_complessivo)).toEqual([10, null, null, 10]);
+    expect(rows[3].modalita).toBeNull();
+    await send({ kind: 'aggregatore', fornitura: [linea({ costo_complessivo: 5 })] });
+    expect(await listAllFornitura()).toHaveLength(1);
+  });
+
+  it('rejects a list of cost lines beyond the size limit', async () => {
+    expect((await send({ kind: 'aggregatore', fornitura: new Array(50_001).fill({}) })).status).toBe(413);
   });
 
   it('rejects a list beyond the size limit', async () => {

@@ -5,13 +5,14 @@ import { getMeta, getQuotaVal, getRtiConfig, quotaValFromRti, updateMeta, update
 import { getModalita, getSeniority, getTimeline, setSeniority, setTimeline } from '@/lib/portfolio';
 import { listAllRisorse, listRisorse, replaceRisorse } from '@/lib/risorse';
 import { listAllGdl, listGdl, persistGdlFromUpload } from '@/lib/gdlStore';
+import { listAllFornitura, persistFornituraFromUpload } from '@/lib/fornituraStore';
 import { getSetting, getSettingsBulk, setSetting } from '@/lib/settings';
 import { getMultiYearTimeline, listTimelineMonths, setTimelineYear } from '@/lib/timelineStore';
 import { listAllReportBdo, persistReportBdoFromUpload } from '@/lib/reportBdoStore';
 import { listAllReportRdi, persistReportRdiFromUpload } from '@/lib/reportRdiStore';
 import { listAllPdc, listPdcByBdo, persistReportPdcFromUpload } from '@/lib/reportPdcStore';
 import { SEED_META, SEED_MODALITA, SEED_QUOTA_VAL, SEED_RTI, SEED_SENIORITY, SEED_TIMELINE } from '@/lib/seed';
-import type { GdlRiga, ReportBdoRecord, ReportPdcRecord, ReportRdiRecord } from '@/lib/types';
+import type { FornituraRiga, GdlRiga, ReportBdoRecord, ReportPdcRecord, ReportRdiRecord } from '@/lib/types';
 import { createTestDb } from './helpers/pglite';
 
 // Same scenarios on the in-memory store and on a real Postgres (PGlite) built by
@@ -22,7 +23,7 @@ vi.mock('@/lib/db', async (importOriginal) => {
   return { ...actual, get hasDB() { return state.hasDB; }, getDb: () => state.db, ensureSchema: async () => {} };
 });
 
-const MEM_KEYS = ['__ARIA_RIS__', '__ARIA_GDL__', '__ARIA_TL_MY__', '__ARIA_REPORT_BDO__', '__ARIA_REPORT_RDI__', '__ARIA_REPORT_PDC__', '__ARIA_CFG__'];
+const MEM_KEYS = ['__ARIA_RIS__', '__ARIA_GDL__', '__ARIA_FORN__', '__ARIA_TL_MY__', '__ARIA_REPORT_BDO__', '__ARIA_REPORT_RDI__', '__ARIA_REPORT_PDC__', '__ARIA_CFG__'];
 const m = (...v: number[]): number[] => [...v, ...Array(12 - v.length).fill(0)];
 
 const bdoRec = (o: Partial<ReportBdoRecord> = {}): ReportBdoRecord => ({
@@ -63,7 +64,7 @@ describe.each(['memory', 'database'] as const)('%s backend', (backend) => {
     state.hasDB = isDb;
     const g = globalThis as Record<string, unknown>;
     for (const k of MEM_KEYS) delete g[k];
-    if (isDb) await pg.exec(`TRUNCATE if_risorse, gdl_righe, timeline_mensile, report_bdo, report_rdi, report_pdc RESTART IDENTITY; DELETE FROM app_config WHERE key <> 'schema_version'`);
+    if (isDb) await pg.exec(`TRUNCATE if_risorse, gdl_righe, fornitura_righe, timeline_mensile, report_bdo, report_rdi, report_pdc RESTART IDENTITY; DELETE FROM app_config WHERE key <> 'schema_version'`);
   });
 
   describe('settings', () => {
@@ -240,6 +241,42 @@ describe.each(['memory', 'database'] as const)('%s backend', (backend) => {
 
     it('an IF with nothing saved has no rows', async () => {
       expect(await listGdl('nope')).toEqual([]);
+    });
+  });
+
+  describe('fornitura (costi per linea)', () => {
+    const linea = (o: Partial<FornituraRiga> = {}): FornituraRiga => ({
+      numero_if: 'A', num_linea: '1', modalita: 'corpo', codice: 'MLS01', descrizione: 'Milestone', quantita: 1,
+      costo_unitario: 41151.82, costo_complessivo: 41151.82, fornitore: 'Intellera', ...o,
+    });
+
+    it('stores every line with its amounts to the cent and reads them back as numbers', async () => {
+      expect(await persistFornituraFromUpload([linea(), linea({ codice: 'MLS02', costo_complessivo: 28219.24, costo_unitario: 28219.239999999998 })])).toEqual({ saved: 2, ifs: ['A'] });
+      const rows = await listAllFornitura();
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject({ modalita: 'corpo', costo_complessivo: 41151.82, quantita: 1 });
+      expect(rows[1].costo_complessivo).toBe(28219.24);
+    });
+
+    it('replaces only the IFs present in the upload and leaves the others alone', async () => {
+      await persistFornituraFromUpload([linea({ numero_if: 'A' }), linea({ numero_if: 'A' }), linea({ numero_if: 'B' })]);
+      await persistFornituraFromUpload([linea({ numero_if: 'A', codice: 'SOLO' })]);
+      const rows = await listAllFornitura();
+      expect(rows.filter((r) => r.numero_if === 'A').map((r) => r.codice)).toEqual(['SOLO']);
+      expect(rows.filter((r) => r.numero_if === 'B')).toHaveLength(1);
+    });
+
+    it('keeps a missing cost and code as null, never 0', async () => {
+      await persistFornituraFromUpload([linea({ costo_complessivo: null, costo_unitario: null, quantita: null, codice: null, modalita: null, fornitore: null })]);
+      expect((await listAllFornitura())[0]).toMatchObject({ costo_complessivo: null, costo_unitario: null, quantita: null, codice: null, modalita: null, fornitore: null });
+    });
+
+    it('an empty upload changes nothing; invalid input is rejected explicitly', async () => {
+      await persistFornituraFromUpload([linea()]);
+      expect(await persistFornituraFromUpload([])).toEqual({ saved: 0, ifs: [] });
+      await expect(persistFornituraFromUpload([linea({ numero_if: '' })])).rejects.toThrow(/senza numero IF/);
+      await expect(persistFornituraFromUpload([linea({ costo_complessivo: Number.NaN })])).rejects.toThrow(/valore non valido/);
+      expect(await listAllFornitura()).toHaveLength(1);
     });
   });
 

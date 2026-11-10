@@ -311,6 +311,8 @@ export type MonthFact = {
 };
 
 // Aggregated payload returned by GET /api/data
+import type { Controlli } from './riconciliazione';
+
 export type DashboardData = {
   // Calendar year the per-intervento monthly profiles refer to, and the years
   // that have data (ascending, always including `anno`).
@@ -328,6 +330,7 @@ export type DashboardData = {
   bef_monthly: BefMonthly[];
   bef_fatturabile: BefFatturabile;
   bef_aggregates: BefAggregates;
+  controlli: Controlli;
   kpi: Kpi;
   revenue_mensile: { mese: string; intellera: number; deloitte: number }[];
   distribuzione_ambito: { ambito: string; count: number; valore: number }[];
@@ -370,6 +373,21 @@ export type GdlRiga = {
   nome_risorsa: string | null;
   gg: number | null; // null = mancante o non numerico: mai convertito in 0
   azienda: string | null; // partner RTI (nome canonico) o ragione sociale se sconosciuta
+};
+
+// Riga del foglio "Oggetto Fornitura" dell'Aggregatore: costo contrattuale di una linea di
+// fornitura (milestone, canone o prestazione a misura) di un IF. La somma dei costi complessivi
+// delle righe di un IF è l'importo dell'IF; il costo di una milestone è la somma delle sue righe.
+export type FornituraRiga = {
+  numero_if: string;
+  num_linea: string | null;
+  modalita: GdlTipo | null;
+  codice: string | null; // codice milestone/attività (MLS01, CAN02…); alcune righe ne sono prive
+  descrizione: string | null; // descrizione della prestazione
+  quantita: number | null;
+  costo_unitario: number | null;
+  costo_complessivo: number | null; // null = mancante o non numerico: mai convertito in 0
+  fornitore: string | null; // partner RTI (nome canonico) o ragione sociale se sconosciuta
 };
 
 // Per-IF/BO resource allocation row (figure professionali, gruppi, giorni uomo).

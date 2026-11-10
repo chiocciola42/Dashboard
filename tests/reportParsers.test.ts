@@ -97,7 +97,7 @@ describe('parseAggregatore', () => {
 
   it('works with only some of the sheets, and with none', () => {
     expect(parseAggregatore(workbook({ 'GdL - Gruppo di Lavoro': [['Figure Professionali', 'GG / Uomo'], ['X', 1]] })).interventi).toEqual([]);
-    expect(parseAggregatore(workbook({ Altro: [['x']] }))).toEqual({ seniority: [], interventi: [], gdl: [] });
+    expect(parseAggregatore(workbook({ Altro: [['x']] }))).toEqual({ seniority: [], interventi: [], gdl: [], fornitura: [] });
   });
 
   it('is what parseFile returns for an Aggregatore file', () => {

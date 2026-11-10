@@ -43,6 +43,7 @@ type Result = {
   seniority_rows?: number;
   gdl_saved?: number;
   gdl_ifs?: string[];
+  fornitura_saved?: number;
   errors?: string[];
   error?: string;
 };
@@ -131,6 +132,7 @@ export default function UploadPage() {
           reportPdc: parsed.reportPdc,
           seniority: parsed.seniority,
           gdl: parsed.gdl,
+          fornitura: parsed.fornitura,
           filename: file.name,
         }),
       }, UPLOAD_FETCH_TIMEOUT_MS);
@@ -348,6 +350,12 @@ export default function UploadPage() {
                   </div>
                   <IfList label="IF con giornate aggiornate" ids={result.gdl_ifs ?? []} />
                 </>
+              )}
+              {!!result.fornitura_saved && (
+                <div className="row">
+                  <span>Costi per linea di fornitura</span>
+                  <b>{result.fornitura_saved}</b>
+                </div>
               )}
               {result.errors?.map((e, i) => (
                 <div className="row" key={i}>

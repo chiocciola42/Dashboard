@@ -15,6 +15,7 @@ import { listAllBef } from './befStore';
 import { listFacts } from './mesiStore';
 import { listAllRisorse } from './risorse';
 import { listAllGdl } from './gdlStore';
+import { listAllFornitura } from './fornituraStore';
 import { listTimelineMonths } from './timelineStore';
 import { getSeniority, getModalita, getTimeline } from './portfolio';
 import { getRtiConfig, getMeta } from './config';
@@ -88,6 +89,7 @@ async function collectFromMemory(): Promise<TableDump[]> {
     bef,
     risorse,
     gdl,
+    fornitura,
     timeline,
     seniority,
     modalita,
@@ -106,6 +108,7 @@ async function collectFromMemory(): Promise<TableDump[]> {
     listAllBef(),
     listAllRisorse(),
     listAllGdl(),
+    listAllFornitura(),
     listTimelineMonths(),
     getSeniority(),
     getModalita(),
@@ -136,6 +139,7 @@ async function collectFromMemory(): Promise<TableDump[]> {
     dump('bef_records', bef as unknown as Record<string, unknown>[]),
     dump('if_risorse', risorse as unknown as Record<string, unknown>[]),
     dump('gdl_righe', gdl as unknown as Record<string, unknown>[]),
+    dump('fornitura_righe', fornitura as unknown as Record<string, unknown>[]),
     dump('timeline_mensile', timeline as unknown as Record<string, unknown>[]),
     dump('tariffe', seniority as unknown as Record<string, unknown>[]),
     dump('report_bdo', reportBdo as unknown as Record<string, unknown>[]),

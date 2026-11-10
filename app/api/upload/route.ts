@@ -12,6 +12,7 @@ import { persistReportPdcFromUpload } from '@/lib/reportPdcStore';
 import { getSeniorityStrict, saveSeniority } from '@/lib/portfolio';
 import { mergeTariffe } from '@/lib/seniority';
 import { persistGdlFromUpload } from '@/lib/gdlStore';
+import { persistFornituraFromUpload } from '@/lib/fornituraStore';
 import { updateMeta } from '@/lib/config';
 import { getSessionUser, canEdit } from '@/lib/auth';
 import { isUploadAuthorized } from '@/lib/auth/uploadSecret';
@@ -21,6 +22,7 @@ import { DASHBOARD_DATA_TAG } from '@/lib/getDashboardData';
 import type {
   BefRecord,
   DocStatus,
+  FornituraRiga,
   GdlRiga,
   GdlTipo,
   Intervento,
@@ -113,6 +115,28 @@ function normalizeGdl(raw: unknown): GdlRiga | null {
   if (!base) return null;
   const tipo = base.tipo && GDL_TIPI.includes(base.tipo) ? (base.tipo as GdlTipo) : null;
   return { ...base, tipo, gg: ggOrNull((raw as Record<string, unknown>).gg) };
+}
+
+// Riga "Oggetto Fornitura" arrivata dal client: dato non fidato. Serve un IF; quantità e costi sono
+// numeri finiti oppure null (mai 0 per un valore illeggibile); la modalità sconosciuta è null.
+const finiteOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+function normalizeFornitura(raw: unknown): FornituraRiga | null {
+  const base = normalizeRow<FornituraRiga>(
+    raw,
+    ['numero_if', 'num_linea', 'modalita', 'codice', 'descrizione', 'fornitore'],
+    { requireAllOf: ['numero_if'] },
+  );
+  if (!base) return null;
+  const r = raw as Record<string, unknown>;
+  const modalita = base.modalita && GDL_TIPI.includes(base.modalita) ? (base.modalita as GdlTipo) : null;
+  return {
+    ...base,
+    modalita,
+    quantita: finiteOrNull(r.quantita),
+    costo_unitario: finiteOrNull(r.costo_unitario),
+    costo_complessivo: finiteOrNull(r.costo_complessivo),
+  };
 }
 
 // Numero BDO is the business key for a "REPORT Bdo" row, so one without it
@@ -296,6 +320,11 @@ async function applyParsedUntimed(parsed: ParseOutput, force: boolean) {
     gdlIfs = res.ifs;
   }
 
+  let fornituraSaved = 0;
+  if (parsed.fornitura && parsed.fornitura.length) {
+    fornituraSaved = (await persistFornituraFromUpload(parsed.fornitura)).saved;
+  }
+
   // Resolve BDO -> numero_if from the saved portfolio (intervento.bdo). Shared
   // by BEF (resolves the owning IF) and REPORT Bdo (restricts saves to BDO
   // already present in the portfolio).
@@ -381,6 +410,7 @@ async function applyParsedUntimed(parsed: ParseOutput, force: boolean) {
     seniority_rows: parsed.seniority?.length ?? 0,
     gdl_saved: gdlSaved,
     gdl_ifs: gdlIfs,
+    fornitura_saved: fornituraSaved,
     errors,
   };
 }
@@ -419,6 +449,7 @@ type JsonUploadBody = {
   reportPdc?: unknown;
   seniority?: ParseOutput['seniority'];
   gdl?: unknown;
+  fornitura?: unknown;
   mesi?: unknown;
   anno?: unknown;
   filename?: string;
@@ -474,6 +505,7 @@ async function handleJsonUpload(req: Request, force: boolean) {
     verbaliSal: boundedList(body.verbaliSal),
     reportPdc: boundedList(body.reportPdc),
     gdl: boundedList(body.gdl),
+    fornitura: boundedList(body.fornitura),
   };
   const invalid = Object.entries(lists).find(([, v]) => v === null);
   if (invalid) {
@@ -494,6 +526,7 @@ async function handleJsonUpload(req: Request, force: boolean) {
     verbaliSal: normalizeList(lists.verbaliSal as unknown[], normalizeVerbaleSal),
     reportPdc: normalizeList(lists.reportPdc as unknown[], normalizeReportPdc),
     gdl: normalizeList(lists.gdl as unknown[], normalizeGdl),
+    fornitura: normalizeList(lists.fornitura as unknown[], normalizeFornitura),
     seniority: body.seniority,
     mesi,
   };

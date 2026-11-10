@@ -1,10 +1,12 @@
-import type { GdlRiga, Intervento, Seniority } from '../types';
-import { modalitaFromGdl, parseGdl } from './parseGdl';
+import type { FornituraRiga, GdlRiga, Intervento, Seniority } from '../types';
+import { ggFromCell, modalitaFromGdl, parseGdl } from './parseGdl';
+import { parseFornitura } from './parseFornitura';
 import { readWorkbook, sheetRows, findSheet, toNumber, toISODate, str, strId, normalizeFornitore } from './util';
 
 export type AggregatoreResult = {
   seniority: Seniority[];
   gdl: GdlRiga[];
+  fornitura: FornituraRiga[];
   interventi: Intervento[];
 };
 
@@ -39,7 +41,9 @@ export function parseAggregatore(input: ArrayBuffer | Buffer): AggregatoreResult
     const agg = new Map<string, number>();
     for (const r of sheetRows(wb, gdlSheet, 0)) {
       const figura = str(r['Figure Professionali']);
-      if (!figura) continue;
+      // Una riga senza GG (vuoti o illeggibili) non porta una figura professionale: è il caso
+      // delle voci di servizio a canone ("Supporto in ambito…"), che non vanno nella tabella figure.
+      if (!figura || ggFromCell(r['GG / Uomo']) == null) continue;
       agg.set(figura, (agg.get(figura) || 0) + toNumber(r['GG / Uomo']));
     }
     for (const [figura, gg] of [...agg.entries()].sort((a, b) => b[1] - a[1])) {
@@ -130,5 +134,5 @@ export function parseAggregatore(input: ArrayBuffer | Buffer): AggregatoreResult
   const gdl = parseGdl(wb);
   const modalita = modalitaFromGdl(gdl);
   const completati = interventi.map((i) => (i.modalita_if ? i : { ...i, modalita_if: modalita.get(i.numero_if) ?? null }));
-  return { seniority, interventi: completati, gdl };
+  return { seniority, interventi: completati, gdl, fornitura: parseFornitura(wb) };
 }
