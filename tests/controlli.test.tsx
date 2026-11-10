@@ -3,7 +3,7 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ControlliPanel from '@/components/panels/ControlliPanel';
-import { MAX_RIGHE_VISIBILI, ammesso, differenza, entita, esitiInVista, euro, filtra, ordina } from '@/components/panels/controlli/controlliView';
+import { MAX_RIGHE_VISIBILI, SCHEDE, ammesso, differenza, entita, esitiInVista, euro, filtra, intestazioni, ordina } from '@/components/panels/controlli/controlliView';
 import { DASHBOARD_DATA_TAG, getDashboardData } from '@/lib/getDashboardData';
 import { persistGdlFromUpload } from '@/lib/gdlStore';
 import { persistFornituraFromUpload } from '@/lib/fornituraStore';
@@ -17,7 +17,7 @@ vi.mock('next/cache', () => ({ revalidateTag: vi.fn(), unstable_cache: (fn: unkn
 afterEach(cleanup);
 
 const esito = (o: Partial<Esito> = {}): Esito => ({
-  livello: 'if', numero_if: 'A', chiave: '', controllo: 'Σ gg × tariffa contro importo IF', importato: 100, ricostruito: 100, differenza: 0, ammesso: 1, stato: 'quadra', motivo: null, ...o,
+  confronto: 'gen_gg', numero_if: 'A', controllo: 'Generalità contro GG × profilo', primo: 100, secondo: 100, differenza: 0, ammesso: 1, stato: 'quadra', motivo: null, ...o,
 });
 const controlli = (esiti: Esito[], o: Partial<Controlli> = {}): Controlli => ({ esiti, tariffeMancanti: [], righe: { gdl: esiti.length, fornitura: esiti.length }, errore: null, ...o });
 const ifs = (...ids: string[]) => ids.map((numero_if) => makeIf({ numero_if }));
@@ -37,25 +37,18 @@ describe('controlliView', () => {
   });
 
   it('names the entity compared', () => {
-    expect(entita(esito({ numero_if: 'A', chiave: 'MLS01' }))).toBe('IF A · MLS01');
-    expect(entita(esito({ numero_if: 'A', chiave: '' }))).toBe('IF A');
-    expect(entita(esito({ livello: 'rti', numero_if: null, chiave: '' }))).toBe('Contratto');
-    expect(entita(esito({ livello: 'dati', numero_if: null, chiave: 'ORFANO' }))).toBe('ORFANO');
+    expect(entita(esito({ numero_if: 'A' }))).toBe('IF A');
   });
 
-  it('esitiInVista keeps the IFs in view, the notes without IF and recomputes the RTI on the view only', () => {
-    const tutti = [
-      esito({ numero_if: 'A', importato: 100, ricostruito: 100, ammesso: 1 }),
-      esito({ numero_if: 'B', importato: 100, ricostruito: 150, differenza: 50, stato: 'discrepanza' }),
-      esito({ livello: 'milestone', numero_if: 'B', chiave: 'MLS01' }),
-      esito({ livello: 'rti', numero_if: null, importato: 200, ricostruito: 250, differenza: 50, stato: 'discrepanza' }),
-      esito({ livello: 'dati', numero_if: null, chiave: 'ORFANO', stato: 'non_confrontabile' }),
-    ];
-    const vista = esitiInVista(tutti, new Set(['A']));
-    expect(vista.filter((e) => e.livello === 'if').map((e) => e.numero_if)).toEqual(['A']);
-    expect(vista.some((e) => e.livello === 'milestone')).toBe(false);
-    expect(vista.find((e) => e.livello === 'rti')).toMatchObject({ importato: 100, ricostruito: 100, stato: 'quadra' });
-    expect(vista.some((e) => e.livello === 'dati' && e.chiave === 'ORFANO')).toBe(true);
+  it('there is one tab per comparison, and the column headers name its two terms', () => {
+    expect(SCHEDE.map((s) => s.id)).toEqual(['tutti', 'gen_gg', 'forn_gen', 'forn_gg']);
+    expect(intestazioni('tutti')).toEqual({ primo: 'Primo valore', secondo: 'Secondo valore' });
+    expect(intestazioni('forn_gen')).toMatchObject({ primo: 'Σ Oggetto Fornitura', secondo: 'Generalità (Importo Previsto)' });
+  });
+
+  it('esitiInVista keeps only the outcomes of the IFs in view', () => {
+    const tutti = [esito({ numero_if: 'A' }), esito({ numero_if: 'B' }), esito({ numero_if: 'B', confronto: 'forn_gg' })];
+    expect(esitiInVista(tutti, new Set(['B'])).map((e) => e.numero_if)).toEqual(['B', 'B']);
   });
 
   it('ordina puts the biggest discrepancy first, then non-comparable, rounding and what squares', () => {
@@ -70,32 +63,33 @@ describe('controlliView', () => {
     expect(e.map((x) => x.numero_if)).toEqual(['A', 'B', 'C', 'D', 'E']); // l'input non è modificato
   });
 
-  it('filtra by level and, optionally, hides what squares', () => {
-    const e = [esito({ stato: 'quadra' }), esito({ livello: 'milestone', stato: 'discrepanza' }), esito({ livello: 'azienda', stato: 'non_confrontabile' })];
+  it('filtra by comparison and, optionally, hides what squares', () => {
+    const e = [esito({ stato: 'quadra' }), esito({ confronto: 'forn_gen', stato: 'discrepanza' }), esito({ confronto: 'forn_gg', stato: 'non_confrontabile' })];
     expect(filtra(e, 'tutti', true)).toHaveLength(2);
     expect(filtra(e, 'tutti', false)).toHaveLength(3);
-    expect(filtra(e, 'milestone', false)).toHaveLength(1);
-    expect(filtra(e, 'if', true)).toHaveLength(0);
+    expect(filtra(e, 'forn_gen', false)).toHaveLength(1);
+    expect(filtra(e, 'gen_gg', true)).toHaveLength(0);
   });
 });
 
 describe('ControlliPanel', () => {
   const base = [
     esito({ numero_if: 'A', stato: 'quadra' }),
-    esito({ numero_if: 'B', stato: 'discrepanza', importato: 8010.6, ricostruito: 12015.9, differenza: 4005.3, ammesso: 3.13 }),
+    esito({ numero_if: 'B', stato: 'discrepanza', primo: 8010.6, secondo: 12015.9, differenza: 4005.3, ammesso: 3.13 }),
     esito({ numero_if: 'C', stato: 'arrotondamento', differenza: -1.15, ammesso: 1.74 }),
-    esito({ numero_if: 'D', stato: 'non_confrontabile', importato: 5, ricostruito: null, differenza: null, ammesso: null, motivo: 'tariffa mancante: Team Leader' }),
-    esito({ livello: 'milestone', numero_if: 'B', chiave: 'MLS02', stato: 'discrepanza', differenza: 5426.8 }),
+    esito({ numero_if: 'D', stato: 'non_confrontabile', primo: 5, secondo: null, differenza: null, ammesso: null, motivo: 'tariffa mancante: Team Leader' }),
+    esito({ confronto: 'forn_gen', numero_if: 'B', stato: 'discrepanza', differenza: 5426.8 }),
   ];
   const mount = (c: Controlli, view = ifs('A', 'B', 'C', 'D')) => render(<ControlliPanel IFs={view} controlli={c} />);
   const rows = () => within(screen.getByRole('table')).getAllByRole('row').slice(1);
 
-  it('counts the IF outcomes in the tiles and lists only what does not square by default', () => {
+  it('shows one tile per comparison with its discrepancies, and lists only what does not square by default', () => {
     mount(controlli(base));
     const tiles = document.querySelector('.kpis')?.textContent ?? '';
-    expect(tiles).toContain('Quadrano · IF1');
-    expect(tiles).toContain('Discrepanze · IF1');
-    expect(rows()).toHaveLength(4 + 1); // B, C, D, milestone + riga RTI non confrontabile?
+    expect(tiles).toContain('Generalità ↔ GG × profilo');
+    expect(tiles).toContain('Fornitura ↔ Generalità');
+    expect(tiles).toContain('Fornitura ↔ GG × profilo');
+    expect(rows()).toHaveLength(4); // B, C, D di gen_gg e B di forn_gen; A quadra è nascosto
   });
 
   it('shows what squares too once asked', () => {
@@ -113,22 +107,22 @@ describe('ControlliPanel', () => {
     expect(screen.getByText('tariffa mancante: Team Leader')).toBeTruthy();
   });
 
-  it('the level buttons restrict the table', () => {
+  it('a comparison tab restricts the table and names the two terms in the headers', () => {
     mount(controlli(base));
-    fireEvent.click(screen.getByRole('button', { name: 'Milestone' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fornitura ↔ Generalità' }));
     expect(rows()).toHaveLength(1);
-    expect(rows()[0].textContent).toContain('MLS02');
     expect(rows()[0].textContent).toContain('5.426,80');
-    expect(screen.getByRole('button', { name: 'Milestone' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('columnheader', { name: 'Σ Oggetto Fornitura' })).toBeTruthy();
+    expect(screen.getByRole('columnheader', { name: 'Generalità (Importo Previsto)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Fornitura ↔ Generalità' }).getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('respects the filtered view: only the IFs in view and an RTI row recomputed on them', () => {
+  it('respects the filtered view: only the IFs in view', () => {
     mount(controlli(base), ifs('A'));
     fireEvent.click(screen.getByLabelText(/Mostra anche/));
     const text = rows().map((r) => r.textContent).join('|');
     expect(text).toContain('IF A');
     expect(text).not.toContain('IF B');
-    expect(text).toContain('Contratto');
   });
 
   it('warns about the missing tariffs and says they are only changed by hand', () => {
@@ -150,14 +144,12 @@ describe('ControlliPanel', () => {
     expect(screen.getByText(/carica un file Aggregatore/)).toBeTruthy();
     unmount();
     mount(controlli([esito({ stato: 'quadra' })]), ifs('A'));
-    fireEvent.click(screen.getByRole('button', { name: 'Milestone' }));
     expect(screen.getByText(/Nessun confronto da mostrare/)).toBeTruthy();
   });
 
   it('REGRESSION: bounds the rows rendered and says how many are hidden', () => {
-    const many = Array.from({ length: MAX_RIGHE_VISIBILI + 25 }, (_, i) => esito({ numero_if: 'A', livello: 'milestone', chiave: `M${i}`, stato: 'discrepanza' }));
-    mount(controlli(many));
-    fireEvent.click(screen.getByRole('button', { name: 'Milestone' }));
+    const many = Array.from({ length: MAX_RIGHE_VISIBILI + 25 }, (_, i) => esito({ numero_if: `I${i}`, stato: 'discrepanza' }));
+    mount(controlli(many), ifs(...many.map((e) => e.numero_if)));
     expect(rows()).toHaveLength(MAX_RIGHE_VISIBILI);
     expect(screen.getByText(new RegExp(`primi ${MAX_RIGHE_VISIBILI} di ${MAX_RIGHE_VISIBILI + 25}`))).toBeTruthy();
   });
@@ -185,10 +177,10 @@ describe('getDashboardData carries the reconciliation', () => {
     await persistFornituraFromUpload([forn('5001', 'CAN01', 8010.6)]);
     const d = await getDashboardData();
     expect(d.controlli.errore).toBeNull();
-    // l'IF 5001 non è nel portafoglio di base: compare come "IF del GdL assente"
-    expect(d.controlli.esiti.some((e) => e.livello === 'dati' && e.chiave === '5001')).toBe(true);
+    // l'IF 5001 non è nel portafoglio di base: non produce confronti
+    expect(d.controlli.esiti.some((e) => e.numero_if === '5001')).toBe(false);
     expect(JSON.stringify(d.controlli)).not.toContain('Mario');
-    expect(controlliDa({ interventi: [{ numero_if: '5001', importo: 8010.6 }], gdl: [gdl('5001', 'CAN01', 'Business Consultant Senior', 45)], fornitura: [forn('5001', 'CAN01', 8010.6)], seniority: [{ figura: 'Business Consultant Senior', code: 'BCS', gg: 0, tariffa: 267.02 }] }).esiti.find((e) => e.livello === 'if')).toMatchObject({ stato: 'discrepanza', differenza: 4005.3 });
+    expect(controlliDa({ interventi: [{ numero_if: '5001', importo: 8010.6 }], gdl: [gdl('5001', 'CAN01', 'Business Consultant Senior', 45)], fornitura: [forn('5001', 'CAN01', 8010.6)], seniority: [{ figura: 'Business Consultant Senior', code: 'BCS', gg: 0, tariffa: 267.02 }] }).esiti.find((e) => e.confronto === 'forn_gg')).toMatchObject({ stato: 'discrepanza', differenza: 4005.3 });
   });
 
   it('without tariffs the report lists the figures that need one; without rows it is empty, not an error', async () => {

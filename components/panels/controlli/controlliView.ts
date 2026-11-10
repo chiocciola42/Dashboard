@@ -1,17 +1,18 @@
 // Logica di vista della scheda «Controlli»: filtri e formattazione, pura e testabile.
-import { esitoRti, type Esito, type Livello, type Stato } from '@/lib/riconciliazione';
+import { CONFRONTI, type Confronto, type Esito, type Stato } from '@/lib/riconciliazione';
 
 // Righe mostrate al massimo: tiene limitato il DOM anche con migliaia di confronti.
 export const MAX_RIGHE_VISIBILI = 300;
 
-export const LIVELLI: readonly { id: Livello | 'tutti'; label: string }[] = [
-  { id: 'tutti', label: 'Tutti i livelli' },
-  { id: 'milestone', label: 'Milestone' },
-  { id: 'azienda', label: 'Azienda' },
-  { id: 'if', label: 'IF' },
-  { id: 'rti', label: 'RTI' },
-  { id: 'dati', label: 'Dati' },
+export const SCHEDE: readonly { id: Confronto | 'tutti'; label: string }[] = [
+  { id: 'tutti', label: 'Tutti i confronti' },
+  ...(Object.keys(CONFRONTI) as Confronto[]).map((id) => ({ id, label: CONFRONTI[id].label })),
 ];
+
+// Intestazioni delle due colonne di valori: i nomi dei termini se la scheda è un solo confronto.
+export function intestazioni(scheda: Confronto | 'tutti'): { primo: string; secondo: string } {
+  return scheda === 'tutti' ? { primo: 'Primo valore', secondo: 'Secondo valore' } : CONFRONTI[scheda];
+}
 
 export const STATO_LABEL: Record<Stato, string> = {
   quadra: 'Quadra',
@@ -27,16 +28,13 @@ export const STATO_CLASS: Record<Stato, string> = {
   non_confrontabile: 'st-na',
 };
 
-// Esiti della vista corrente: quelli degli IF filtrati, quelli senza IF (note sui dati) e il
-// confronto RTI ricalcolato sui soli IF in vista.
+// Esiti della vista corrente: quelli degli IF filtrati.
 export function esitiInVista(esiti: readonly Esito[], ifInVista: ReadonlySet<string>): Esito[] {
-  const visibili = esiti.filter((e) => e.livello !== 'rti' && (e.numero_if == null || ifInVista.has(e.numero_if)));
-  const ifEsiti = visibili.filter((e) => e.livello === 'if');
-  return [...visibili.filter((e) => e.livello === 'if' || e.livello === 'milestone' || e.livello === 'azienda'), esitoRti(ifEsiti), ...visibili.filter((e) => e.livello === 'dati')];
+  return esiti.filter((e) => ifInVista.has(e.numero_if));
 }
 
-export function filtra(esiti: readonly Esito[], livello: Livello | 'tutti', soloProblemi: boolean): Esito[] {
-  return esiti.filter((e) => (livello === 'tutti' || e.livello === livello) && (!soloProblemi || e.stato !== 'quadra'));
+export function filtra(esiti: readonly Esito[], scheda: Confronto | 'tutti', soloProblemi: boolean): Esito[] {
+  return esiti.filter((e) => (scheda === 'tutti' || e.confronto === scheda) && (!soloProblemi || e.stato !== 'quadra'));
 }
 
 // Importi con il separatore delle migliaia SEMPRE presente (l'italiano lo omette sotto le 5 cifre:
@@ -64,13 +62,9 @@ export function ordina(esiti: readonly Esito[]): Esito[] {
     const da = Math.abs(a.differenza ?? 0);
     const db = Math.abs(b.differenza ?? 0);
     if (da !== db) return db - da;
-    return `${a.numero_if ?? ''}${a.chiave}`.localeCompare(`${b.numero_if ?? ''}${b.chiave}`);
+    return `${a.numero_if}${a.confronto}`.localeCompare(`${b.numero_if}${b.confronto}`);
   });
 }
 
-// Etichetta dell'entità confrontata: l'IF e, se c'è, la milestone/azienda/figura.
-export function entita(e: Esito): string {
-  if (e.numero_if && e.chiave) return `IF ${e.numero_if} · ${e.chiave}`;
-  if (e.numero_if) return `IF ${e.numero_if}`;
-  return e.chiave || 'Contratto';
-}
+// Etichetta dell'entità confrontata: l'IF.
+export const entita = (e: Esito): string => `IF ${e.numero_if}`;
