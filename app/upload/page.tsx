@@ -31,6 +31,9 @@ type Result = {
   insertedIfs?: string[];
   updatedIfs?: string[];
   skippedIfs?: string[];
+  absent_ifs?: string[];
+  archived_ifs?: string[];
+  absent_preserved_ifs?: string[];
   bef_saved?: number;
   bef_ifs?: string[];
   report_bdo_saved?: number;
@@ -72,6 +75,7 @@ export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [token, setToken] = useState('');
   const [force, setForce] = useState(false);
+  const [sync, setSync] = useState(true);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
@@ -115,6 +119,7 @@ export default function UploadPage() {
       setProgress(55);
       const qs = new URLSearchParams();
       if (force) qs.set('force', 'true');
+      if (sync && parsed.kind === 'aggregatore') qs.set('sync', 'true');
       const res = await fetchWithTimeout('/api/upload?' + qs.toString(), {
         method: 'POST',
         headers: token
@@ -224,6 +229,10 @@ export default function UploadPage() {
           <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} /> Forza sovrascrittura record
           modificati manualmente (?force=true)
         </label>
+        <label className="chk">
+          <input type="checkbox" checked={sync} onChange={(e) => setSync(e.target.checked)} /> Aggregatore: archivia gli IF
+          dell&apos;app assenti dal file (?sync=true, recuperabili)
+        </label>
       </div>
 
       <div className="formbtns">
@@ -276,6 +285,24 @@ export default function UploadPage() {
                       </span>
                     </div>
                   )}
+                </>
+              )}
+              {!!result.absent_ifs?.length && (
+                <>
+                  <div className="row">
+                    <span>IF dell&apos;app assenti dal file Aggregatore</span>
+                    <b>{result.absent_ifs.length}</b>
+                  </div>
+                  <IfList label="IF assenti dal file" ids={result.absent_ifs} defaultOpen />
+                  <div className="row" style={{ fontSize: 12, color: 'var(--muted)' }}>
+                    <span>
+                      {result.archived_ifs?.length
+                        ? `Archiviati ${result.archived_ifs.length}: non contano più nei totali.`
+                        : 'Non archiviati: i loro importi restano nei totali. Ricarica con l’opzione di archiviazione.'}
+                      {!!result.absent_preserved_ifs?.length &&
+                        ` ${result.absent_preserved_ifs.length} modificati a mano sono stati preservati (serve Forza sovrascrittura).`}
+                    </span>
+                  </div>
                 </>
               )}
               {!!result.bef_saved && (
