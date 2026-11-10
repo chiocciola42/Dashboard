@@ -9,7 +9,10 @@ import { persistReportRdiFromUpload } from '@/lib/reportRdiStore';
 import { persistVerbaliAperturaFromUpload } from '@/lib/verbaliAperturaStore';
 import { persistVerbaliSalFromUpload } from '@/lib/verbaliSalStore';
 import { persistReportPdcFromUpload } from '@/lib/reportPdcStore';
-import { setSeniority } from '@/lib/portfolio';
+import { getSeniorityStrict, saveSeniority } from '@/lib/portfolio';
+import { mergeTariffe } from '@/lib/seniority';
+import { persistGdlFromUpload } from '@/lib/gdlStore';
+import { persistFornituraFromUpload } from '@/lib/fornituraStore';
 import { updateMeta } from '@/lib/config';
 import { getSessionUser, canEdit } from '@/lib/auth';
 import { isUploadAuthorized } from '@/lib/auth/uploadSecret';
@@ -19,6 +22,9 @@ import { DASHBOARD_DATA_TAG } from '@/lib/getDashboardData';
 import type {
   BefRecord,
   DocStatus,
+  FornituraRiga,
+  GdlRiga,
+  GdlTipo,
   Intervento,
   ReportBdoRecord,
   ReportRdiRecord,
@@ -87,6 +93,50 @@ function normalizeBef(raw: unknown): BefRecord | null {
     ['num_bdo', 'descrizione', 'numero_linea_ordine', 'periodo_competenza', 'fornitore_reale', 'importo_ricezione', 'num_fattura', 'data_fattura', 'data_pagamento'],
     { requireAnyOf: ['num_bdo', 'num_fattura'], numeric: ['importo_ricezione'] },
   );
+}
+
+const GDL_TIPI: readonly string[] = ['corpo', 'canone', 'consumo'];
+
+// GG di una riga GdL arrivata dal client: solo un numero finito >= 0 è valido. Tutto il resto
+// (testo, negativo, NaN) è "mancante" (null): il normalizzatore generico `num` lo trasformerebbe
+// in 0, cioè in una giornata zero che non esiste.
+const ggOrNull = (v: unknown): number | null =>
+  typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
+
+// Riga GdL arrivata dal client (file grandi analizzati nel browser): dato non fidato, quindi
+// ogni campo è riletto e validato. Servono IF e figura; tipo sconosciuto e GG non validi
+// diventano null.
+function normalizeGdl(raw: unknown): GdlRiga | null {
+  const base = normalizeRow<GdlRiga>(
+    raw,
+    ['numero_if', 'codice', 'tipo', 'descrizione', 'figura', 'nome_risorsa', 'azienda'],
+    { requireAllOf: ['numero_if', 'figura'] },
+  );
+  if (!base) return null;
+  const tipo = base.tipo && GDL_TIPI.includes(base.tipo) ? (base.tipo as GdlTipo) : null;
+  return { ...base, tipo, gg: ggOrNull((raw as Record<string, unknown>).gg) };
+}
+
+// Riga "Oggetto Fornitura" arrivata dal client: dato non fidato. Serve un IF; quantità e costi sono
+// numeri finiti oppure null (mai 0 per un valore illeggibile); la modalità sconosciuta è null.
+const finiteOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+function normalizeFornitura(raw: unknown): FornituraRiga | null {
+  const base = normalizeRow<FornituraRiga>(
+    raw,
+    ['numero_if', 'num_linea', 'modalita', 'codice', 'descrizione', 'fornitore'],
+    { requireAllOf: ['numero_if'] },
+  );
+  if (!base) return null;
+  const r = raw as Record<string, unknown>;
+  const modalita = base.modalita && GDL_TIPI.includes(base.modalita) ? (base.modalita as GdlTipo) : null;
+  return {
+    ...base,
+    modalita,
+    quantita: finiteOrNull(r.quantita),
+    costo_unitario: finiteOrNull(r.costo_unitario),
+    costo_complessivo: finiteOrNull(r.costo_complessivo),
+  };
 }
 
 // Numero BDO is the business key for a "REPORT Bdo" row, so one without it
@@ -256,7 +306,23 @@ async function applyParsedUntimed(parsed: ParseOutput, force: boolean) {
     mesiSaved = res.rows;
   }
   if (parsed.seniority && parsed.seniority.length) {
-    await setSeniority(parsed.seniority);
+    // Le tariffe di gara si cambiano solo a mano: il caricamento le conserva tutte. Lettura e
+    // scrittura sono "strict": se il database non risponde l'upload fallisce, invece di
+    // ripartire dal seed e riscrivere la tabella senza le tariffe.
+    await saveSeniority(mergeTariffe(await getSeniorityStrict(), parsed.seniority));
+  }
+
+  let gdlSaved = 0;
+  let gdlIfs: string[] = [];
+  if (parsed.gdl && parsed.gdl.length) {
+    const res = await persistGdlFromUpload(parsed.gdl);
+    gdlSaved = res.saved;
+    gdlIfs = res.ifs;
+  }
+
+  let fornituraSaved = 0;
+  if (parsed.fornitura && parsed.fornitura.length) {
+    fornituraSaved = (await persistFornituraFromUpload(parsed.fornitura)).saved;
   }
 
   // Resolve BDO -> numero_if from the saved portfolio (intervento.bdo). Shared
@@ -342,6 +408,9 @@ async function applyParsedUntimed(parsed: ParseOutput, force: boolean) {
     report_pdc_ignored: reportPdcIgnored,
     mesi_saved: mesiSaved,
     seniority_rows: parsed.seniority?.length ?? 0,
+    gdl_saved: gdlSaved,
+    gdl_ifs: gdlIfs,
+    fornitura_saved: fornituraSaved,
     errors,
   };
 }
@@ -379,6 +448,8 @@ type JsonUploadBody = {
   verbaliSal?: unknown;
   reportPdc?: unknown;
   seniority?: ParseOutput['seniority'];
+  gdl?: unknown;
+  fornitura?: unknown;
   mesi?: unknown;
   anno?: unknown;
   filename?: string;
@@ -433,6 +504,8 @@ async function handleJsonUpload(req: Request, force: boolean) {
     verbaliApertura: boundedList(body.verbaliApertura),
     verbaliSal: boundedList(body.verbaliSal),
     reportPdc: boundedList(body.reportPdc),
+    gdl: boundedList(body.gdl),
+    fornitura: boundedList(body.fornitura),
   };
   const invalid = Object.entries(lists).find(([, v]) => v === null);
   if (invalid) {
@@ -452,6 +525,8 @@ async function handleJsonUpload(req: Request, force: boolean) {
     verbaliApertura: normalizeList(lists.verbaliApertura as unknown[], normalizeVerbaleApertura),
     verbaliSal: normalizeList(lists.verbaliSal as unknown[], normalizeVerbaleSal),
     reportPdc: normalizeList(lists.reportPdc as unknown[], normalizeReportPdc),
+    gdl: normalizeList(lists.gdl as unknown[], normalizeGdl),
+    fornitura: normalizeList(lists.fornitura as unknown[], normalizeFornitura),
     seniority: body.seniority,
     mesi,
   };

@@ -445,3 +445,8 @@ tr.row-saved{animation:rowsaved 1.3s ease-out}
 .statuspill.pending{background:#FBF1D3;color:var(--amber-d)}
 .statuspill.approved{background:#E6F4EC;color:var(--good)}
 .statuspill.rejected{background:#FCEBE7;color:var(--bad)}
+/* Scheda Controlli: stato dei confronti (sempre accompagnato dal testo, mai solo colore) */
+.pill.st-ok{background:#E7F3EC;color:var(--good)}
+.pill.st-rnd{background:#EEF4F0;color:#3F7A59}
+.pill.st-bad{background:#F8E4DE;color:var(--bad)}
+.pill.st-na{background:#EEF1F0;color:var(--slate)}

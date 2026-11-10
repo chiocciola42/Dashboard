@@ -337,6 +337,18 @@ const FORNITORE_PATTERNS: [RegExp, string][] = [
   [/gellify/i, 'Gellify'],
 ];
 
+// Partner RTI riconosciuto in una ragione sociale (anche Intellera), oppure null se il
+// nome non corrisponde a nessun partner noto. A differenza di `normalizeFornitore` non
+// ripiega su 'Intellera': chi non è riconosciuto resta distinguibile.
+export function partnerName(raw: unknown): string | null {
+  const s = str(raw);
+  if (!s) return null;
+  for (const [re, name] of FORNITORE_PATTERNS) {
+    if (re.test(s)) return name;
+  }
+  return /intellera/i.test(s) ? 'Intellera' : null;
+}
+
 // Normalizes a raw "Fornitore" value onto one of the RTI's canonical partner
 // names, regardless of legal-form suffixes, capitalization or spacing in the
 // source ragione sociale. Anything unrecognized (including Intellera itself,

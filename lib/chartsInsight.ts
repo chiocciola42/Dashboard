@@ -270,26 +270,27 @@ function gapHover(inp: BillingGapInput, g: GapSeries, x: (i: number) => number, 
   return out;
 }
 
-type GapGeom = { x: (i: number) => number; y: (v: number) => number; W: number; pr: number; pt: number; pb: number };
+type GapGeom = { x: (i: number) => number; y: (v: number) => number; W: number; pl: number; pt: number; pb: number; bandTop: number };
 
+// Riepilogo in una fascia sotto il grafico: i numeri non competono con le etichette di fine linea.
 function gapSummary(inp: BillingGapInput, g: GapSeries, c: GapGeom): string {
-  const bx = c.W - c.pr + 12;
   const fmtLag = (m: number | null): string => (m == null ? '—' : `${IT1(m)} mesi`);
   const cumB = g.cumB[g.last];
-  const blocks: [string, string][] = [];
+  const blocks: { label: string; value: string; color: string }[] = [];
   if (g.cumF) {
-    blocks.push(['Revenue non ancora fatturabile', eurCompact(g.cumR[g.last] - g.cumF[g.last])]);
-    blocks.push(['Fatturabile non ancora fatturato', eurCompact(g.cumF[g.last] - cumB)]);
+    blocks.push({ label: 'Revenue non ancora fatturabile', value: eurCompact(g.cumR[g.last] - g.cumF[g.last]), color: C.petrol });
+    blocks.push({ label: 'Fatturabile non ancora fatturato', value: eurCompact(g.cumF[g.last] - cumB), color: C.gold });
   } else {
-    blocks.push(['Da fatturare ad oggi', eurCompact(g.cumR[g.last] - cumB)]);
+    blocks.push({ label: 'Da fatturare ad oggi', value: eurCompact(g.cumR[g.last] - cumB), color: C.gold });
   }
-  blocks.push(['Ritardo revenue → fattura', fmtLag(lagMonths(g.cumR, cumB, g.last, inp.monthsPerPeriod ?? 1))]);
-  const step = 50;
-  let out = '';
-  blocks.forEach(([label, value], i) => {
-    const y0 = c.pb - 20 - (blocks.length - 1 - i) * step - 24;
-    out += svgText(bx, y0, label, { fill: C.muted, size: 10.5 });
-    out += svgText(bx, y0 + 21, value, { fill: C.ink, weight: 800, size: 17 });
+  blocks.push({ label: 'Ritardo revenue → fattura', value: fmtLag(lagMonths(g.cumR, cumB, g.last, inp.monthsPerPeriod ?? 1)), color: C.ink });
+  const colW = (c.W - c.pl - 8) / blocks.length;
+  let out = svgLine(c.pl, c.bandTop, c.W - 8, c.bandTop, C.line);
+  blocks.forEach((blk, i) => {
+    const x0 = c.pl + i * colW;
+    out += svgRect(x0, c.bandTop + 14, 10, 10, blk.color, 2, i < blocks.length - 1 ? 'opacity="0.75"' : '');
+    out += svgText(x0 + 16, c.bandTop + 23, blk.label, { fill: C.muted, size: 11 });
+    out += svgText(x0 + 16, c.bandTop + 47, blk.value, { fill: C.ink, weight: 800, size: 19 });
   });
   return out;
 }
@@ -315,10 +316,11 @@ function gapEndLabels(inp: BillingGapInput, g: GapSeries, c: GapGeom): string {
   out += svgCircle(c.x(g.last), c.y(g.cumR[g.last]), 5, C.petrol);
   if (g.cumF) {
     out += svgCircle(c.x(g.last), c.y(g.cumF[g.last]), 5, C.gold);
-    out += svgText(xl, c.y(g.cumF[g.last]) - 8, `Fatturabile reale ${eurCompact(g.cumF[g.last])}`, { fill: C.ink, weight: 700, size: 11.5 });
+    out += svgText(xl, c.y(g.cumF[g.last]) - 8, `Fatturabile ${eurCompact(g.cumF[g.last])}`, { fill: C.ink, weight: 700, size: 11.5 });
   }
   out += svgCircle(c.x(g.last), c.y(g.cumB[g.last]), 5, C.amberD);
-  out += svgText(xl, c.y(g.cumB[g.last]) + (g.cumF ? 14 : 4), `${inp.billedName} ${eurCompact(g.cumB[g.last])}`, { fill: C.amberD, weight: 700, size: 11.5 });
+  const billedShort = /emesso/i.test(inp.billedName) ? 'Emesso' : inp.billedName;
+  out += svgText(xl, c.y(g.cumB[g.last]) + (g.cumF ? 14 : 4), `${billedShort} ${eurCompact(g.cumB[g.last])}`, { fill: C.amberD, weight: 700, size: 11.5 });
   return out;
 }
 
@@ -327,9 +329,10 @@ export function chartBillingGap(inp: BillingGapInput): string {
   const n = inp.labels.length;
   if (n === 0) return EMPTY('Nessun dato');
   const W = 920;
-  const H = 400;
+  const H = 400; // altezza del grafico; la fascia dei riepiloghi sta sotto
+  const BAND = 64;
   const pl = 78;
-  const pr = 200;
+  const pr = 150;
   const pt = 16;
   const pb = 32;
   const h = H - pt - pb;
@@ -337,7 +340,7 @@ export function chartBillingGap(inp: BillingGapInput): string {
   const x = linearScale(0, Math.max(1, n - 1), pl + 20, W - pr - 20);
   const max = niceCeil(Math.max(g.cumR[n - 1] || 0, g.cumB[g.last] || 0, g.cumP[g.last] || 0, g.cumF ? g.cumF[g.last] : 0));
   const y = linearScale(0, max, pt + h, pt);
-  const c: GapGeom = { x, y, W, pr, pt, pb: pt + h };
+  const c: GapGeom = { x, y, W, pl, pt, pb: pt + h, bandTop: H + 4 };
   const line = (a: number[], stroke: string, width: number, dash?: string): string =>
     svgPath(pathD(a.map((v, i) => [x(i), y(v)] as const)), { stroke, width, dash });
   let out = hGrid(pl, W - pr, y, max, 5, eurCompact, { line: C.line, text: C.muted });
@@ -359,7 +362,7 @@ export function chartBillingGap(inp: BillingGapInput): string {
   if (g.last >= 0) out += gapLag(inp, g, c) + gapSummary(inp, g, c);
   out += gapEndLabels(inp, g, c);
   out += gapHover(inp, g, x, (W - pl - pr) / Math.max(1, n - 1), pt, h);
-  return svgWrap(W, H, out);
+  return svgWrap(W, g.last >= 0 ? H + BAND : H, out);
 }
 
 // ---------------------------------------------------------------------------

@@ -79,6 +79,46 @@ export async function getSettingsBulk(seeds: Record<string, unknown>): Promise<R
   return out;
 }
 
+// Come `getSetting`, ma un errore del database si PROPAGA invece di ripiegare su cache o seed.
+// Serve prima di una scrittura che parte dal valore letto (leggi, modifica, riscrivi): con il
+// ripiego silenzioso un guasto momentaneo farebbe ripartire dal seed e la riscrittura cancellerebbe
+// dati inseriti a mano. Una chiave assente (lettura riuscita, nessuna riga) vale il seed.
+export async function getSettingStrict<T>(key: string, seed: T): Promise<T> {
+  const mem = memStore();
+  if (hasDB) {
+    await ensureSchema();
+    const rows = (await getDb().execute(
+      sql`select value from app_config where key = ${key} limit 1`,
+    )) as unknown as { rows?: { value: unknown }[] } | { value: unknown }[];
+    const list = Array.isArray(rows) ? rows : rows.rows ?? [];
+    if (list.length && list[0].value != null) {
+      mem[key] = list[0].value;
+      return clone(list[0].value as T);
+    }
+    return clone(seed);
+  }
+  if (key in mem) return clone(mem[key] as T);
+  mem[key] = clone(seed);
+  return clone(seed);
+}
+
+// Come `setSetting`, ma se la scrittura sul database fallisce l'errore si propaga: chi chiama non
+// riceve un "ok" per un valore che non è stato salvato, e la cache in memoria non resta diversa
+// dal database.
+export async function setSettingStrict<T>(key: string, value: T): Promise<T> {
+  if (hasDB) {
+    await ensureSchema();
+    const json = JSON.stringify(value);
+    await getDb().execute(
+      sql`insert into app_config (key, value, updated_at)
+          values (${key}, ${json}::jsonb, now())
+          on conflict (key) do update set value = ${json}::jsonb, updated_at = now()`,
+    );
+  }
+  memStore()[key] = clone(value);
+  return clone(value);
+}
+
 export async function setSetting<T>(key: string, value: T): Promise<T> {
   const mem = memStore();
   mem[key] = clone(value);

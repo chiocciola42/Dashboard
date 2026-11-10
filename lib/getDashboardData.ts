@@ -4,6 +4,9 @@ import { listInterventiBase } from './store';
 import { factsToMap, listFacts, overlayMesi, parseAnno, pickDefaultAnno, yearsOf } from './mesiStore';
 import { quotaValFromRti } from './config';
 import { listAllBef, computeBefMonthlyTotals, computeBefFatturabileMonthly, computeBefAggregates } from './befStore';
+import { listAllGdl } from './gdlStore';
+import { listAllFornitura } from './fornituraStore';
+import { controlliDa } from './riconciliazione';
 import { getSettingsBulk } from './settings';
 import { timed } from './perf';
 import { SEED_FORNITORI, SEED_RTI, SEED_META, SEED_SENIORITY, SEED_MODALITA, SEED_TIMELINE } from './seed';
@@ -43,7 +46,7 @@ async function assembleDashboardData(
   requestedAnno: number | null,
   currentYear: number,
 ): Promise<DashboardData & { revenue_mensile: ReturnType<typeof revenueMensile> }> {
-  const [base, settings, befRows, facts] = await Promise.all([
+  const [base, settings, befRows, facts, gdl, fornitura] = await Promise.all([
     listInterventiBase(),
     getSettingsBulk({
       rti: SEED_RTI,
@@ -54,6 +57,8 @@ async function assembleDashboardData(
     }),
     listAllBef(),
     listFacts(),
+    listAllGdl(),
+    listAllFornitura(),
   ]);
   const anni = yearsOf(facts);
   const anno = requestedAnno ?? pickDefaultAnno(anni, new Date(currentYear, 5, 15));
@@ -84,6 +89,14 @@ async function assembleDashboardData(
     bef_monthly: computeBefMonthlyTotals(intelleraBef),
     bef_fatturabile: computeBefFatturabileMonthly(intelleraBef),
     bef_aggregates: computeBefAggregates(intelleraBef),
+    // Riconciliazione gg × tariffa contro gli importi importati. Le tariffe sono quelle di
+    // app_config (modificabili solo a mano); qui si leggono e basta.
+    controlli: controlliDa({
+      interventi: all.map((i) => ({ numero_if: i.numero_if, importo: i.importo })),
+      gdl,
+      fornitura,
+      seniority: settings.seniority as Seniority[],
+    }),
     kpi: computeKpi(all),
     revenue_mensile: revenueMensile(all, anno),
     distribuzione_ambito: distribuzioneAmbito(all),

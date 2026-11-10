@@ -9,6 +9,7 @@ import ModalitaPanel from '../panels/ModalitaPanel';
 import StatoPanel from '../panels/StatoPanel';
 import RegistroPanel from '../panels/RegistroPanel';
 import DettaglioIFPanel from '../panels/DettaglioIFPanel';
+import ControlliPanel from '../panels/ControlliPanel';
 import type { RtiUpdate } from './usePortfolioEditing';
 
 export type ActivePanelProps = {
@@ -102,6 +103,8 @@ export default function ActivePanel(p: ActivePanelProps) {
           highlightIds={p.highlightIds}
         />
       );
+    case 8:
+      return <ControlliPanel IFs={IFs} controlli={data.controlli} />;
     default:
       return null;
   }

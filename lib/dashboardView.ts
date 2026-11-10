@@ -4,7 +4,7 @@
 import type { Intervento, InterventoInput, RtiConfig } from './types';
 import type { Filters } from './queries';
 
-export const TABS = ['Overview', 'Quote RTI', 'Timeline', 'Distribuzione', 'Modalità fornitura', 'Stato IF / BO', 'Operativo', 'Dettaglio IF'];
+export const TABS = ['Overview', 'Quote RTI', 'Timeline', 'Distribuzione', 'Modalità fornitura', 'Stato IF / BO', 'Operativo', 'Dettaglio IF', 'Controlli'];
 export const REGISTRO_TAB = 6;
 
 // Most recent manual edit recorded on the data (null when none / unparsable).

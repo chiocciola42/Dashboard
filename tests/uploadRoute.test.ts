@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '@/app/api/upload/route';
 import { getIfMesi, listFacts } from '@/lib/mesiStore';
 import { createIntervento, getIntervento, listInterventiBase } from '@/lib/store';
+import { listAllGdl } from '@/lib/gdlStore';
+import { listAllFornitura } from '@/lib/fornituraStore';
+import { getSeniority, setSeniority } from '@/lib/portfolio';
+import { workbook } from './helpers/xlsx';
 
 const state = vi.hoisted(() => ({ user: null as null | { id: number; email: string; role: string; status: string } }));
 vi.mock('@/lib/auth', async (importOriginal) => {
@@ -172,5 +176,111 @@ describe('POST /api/upload — monthly facts', () => {
 
   it('rejects an unrecognised file kind', async () => {
     expect((await send({ kind: 'unknown', interventi: [] })).status).toBe(422);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GdL (giornate reali per IF) e tariffe della tabella figure
+// ---------------------------------------------------------------------------
+describe('POST /api/upload — GdL and seniority', () => {
+  const send = (body: unknown) =>
+    POST(new Request('http://localhost/api/upload', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }));
+  const riga = (o: Record<string, unknown> = {}) => ({ numero_if: '20260001', codice: 'MLS01', tipo: 'corpo', descrizione: 'M', figura: 'Strategy Consultant', nome_risorsa: null, gg: 10, azienda: 'Intellera', ...o });
+
+  beforeEach(() => {
+    delete process.env.UPLOAD_SECRET;
+    state.user = EDITOR;
+    const g = globalThis as Record<string, unknown>;
+    g.__ARIA_MEM__ = [];
+    g.__ARIA_MESI__ = new Map();
+    delete g.__ARIA_GDL__;
+    delete g.__ARIA_FORN__;
+    delete g.__ARIA_CFG__;
+  });
+
+  it('a GdL-only Aggregatore upload is accepted and saved, with the IFs it touched', async () => {
+    const res = await send({ kind: 'aggregatore', gdl: [riga(), riga(), riga({ numero_if: '20260002' })] });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, gdl_saved: 3, gdl_ifs: ['20260001', '20260002'] });
+    expect(await listAllGdl()).toHaveLength(3);
+  });
+
+  it('REGRESSION: identical rows are kept, and re-uploading an IF replaces its rows instead of doubling them', async () => {
+    await send({ kind: 'aggregatore', gdl: [riga(), riga()] });
+    await send({ kind: 'aggregatore', gdl: [riga({ gg: 7 }), riga({ gg: 7 }), riga({ gg: 7 })] });
+    const rows = await listAllGdl();
+    expect(rows).toHaveLength(3);
+    expect(rows.every((r) => r.gg === 7)).toBe(true);
+  });
+
+  it('untrusted rows are validated: no IF or figure drops the row, bad GG and kind become null', async () => {
+    const res = await send({
+      kind: 'aggregatore',
+      gdl: [riga(), riga({ numero_if: '' }), riga({ figura: null }), riga({ gg: -4 }), riga({ gg: 'abc' }), riga({ tipo: 'altro' }), 'x', null],
+    });
+    const body = await res.json();
+    expect(body.gdl_saved).toBe(4);
+    const rows = await listAllGdl();
+    expect(rows.map((r) => r.gg)).toEqual([10, null, null, 10]);
+    expect(rows[3].tipo).toBeNull();
+  });
+
+  it('REGRESSION: a real Aggregatore file uploaded directly saves its GdL rows and the seniority totals', async () => {
+    const book = workbook({
+      'GdL - Gruppo di Lavoro': [
+        ['File Sorgente', 'Cod. Milestone / Attività', 'Descrizione Milestone', 'Figure Professionali', 'Nome Risorsa', 'GG / Uomo', 'Azienda di Appartenenza', 'Numero IF'],
+        ['f1', 'MLS01', 'M', 'Strategy Consultant', null, 10, 'Intellera Consulting S.p.A.', 20260001],
+        ['f1', 'MLS01', 'M', 'Strategy Consultant', null, 10, 'Intellera Consulting S.p.A.', 20260001],
+        ['f2', 'CAN01', 'C', 'Project Manager', null, 5, 'Deloitte Consulting S.r.l.', 20260002],
+      ],
+    });
+    const form = new FormData();
+    form.set('file', new File([new Uint8Array(book)], 'Aggregatore_Dati_ARIA.xlsx'));
+    const res = await POST(new Request('http://localhost/api/upload', { method: 'POST', body: form }));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, kind: 'aggregatore', gdl_saved: 3, seniority_rows: 2 });
+    expect((await listAllGdl()).map((r) => r.azienda)).toEqual(['Intellera', 'Intellera', 'Deloitte']);
+    expect((await getSeniority()).reduce((t, x) => t + x.gg, 0)).toBe(25);
+  });
+
+  it('cost lines travel too: validated, kept with null for unreadable amounts, replaced per IF', async () => {
+    const linea = (o: Record<string, unknown> = {}) => ({ numero_if: '20260001', num_linea: '1', modalita: 'corpo', codice: 'MLS01', descrizione: 'M', quantita: 1, costo_unitario: 10, costo_complessivo: 10, fornitore: 'Intellera', ...o });
+    const res = await send({ kind: 'aggregatore', fornitura: [linea(), linea({ costo_complessivo: 'abc' }), linea({ costo_complessivo: Number.NaN }), linea({ modalita: 'altro' }), linea({ numero_if: '' }), 'x', null] });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, fornitura_saved: 4 });
+    const rows = await listAllFornitura();
+    expect(rows.map((r) => r.costo_complessivo)).toEqual([10, null, null, 10]);
+    expect(rows[3].modalita).toBeNull();
+    await send({ kind: 'aggregatore', fornitura: [linea({ costo_complessivo: 5 })] });
+    expect(await listAllFornitura()).toHaveLength(1);
+  });
+
+  it('rejects a list of cost lines beyond the size limit', async () => {
+    expect((await send({ kind: 'aggregatore', fornitura: new Array(50_001).fill({}) })).status).toBe(413);
+  });
+
+  it('rejects a list beyond the size limit', async () => {
+    const res = await send({ kind: 'aggregatore', gdl: new Array(50_001).fill(riga()) });
+    expect(res.status).toBe(413);
+  });
+
+  it('REGRESSION: tariffs set by hand survive an Aggregatore upload, even if the file carries a different one', async () => {
+    await setSeniority([{ figura: 'Strategy Consultant', code: 'SC', gg: 1, tariffa: 450 }]);
+    await send({ kind: 'aggregatore', seniority: [{ figura: 'Strategy Consultant', code: 'SC', gg: 99, tariffa: 999 }], gdl: [riga()] });
+    expect(await getSeniority()).toEqual([{ figura: 'Strategy Consultant', code: 'SC', gg: 99, tariffa: 450 }]);
+  });
+
+  it('REGRESSION: a figure with a tariff that is not in the uploaded file stays in the table', async () => {
+    await setSeniority([
+      { figura: 'Strategy Consultant', code: 'SC', gg: 1, tariffa: 450 },
+      { figura: 'Team Leader', code: 'TL', gg: 5, tariffa: 530 },
+    ]);
+    await send({ kind: 'aggregatore', seniority: [{ figura: 'Strategy Consultant', code: 'SC', gg: 99, tariffa: null }], gdl: [riga()] });
+    const table = await getSeniority();
+    expect(table.find((x) => x.figura === 'Team Leader')).toMatchObject({ tariffa: 530, gg: 0 });
+    expect(table.find((x) => x.figura === 'Strategy Consultant')).toMatchObject({ tariffa: 450, gg: 99 });
   });
 });
