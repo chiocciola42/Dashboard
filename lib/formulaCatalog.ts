@@ -218,10 +218,10 @@ export const FORMULA_CATALOG: FormulaRow[] = [
     pagina: '2 Quote RTI',
     sezione: 'Erosione per partner',
     elemento: 'Impegnato per partner',
-    formula: 'impByP[p] = Σ importo delle IF con fornitore = p',
+    formula: 'impByP[p] = Σ importo × frazione_p dell’IF; frazione_p = Σ costo righe di p / Σ costo righe dell’IF (senza righe attribuibili: 1 per il fornitore dell’IF)',
     spiegazione:
-      'Valore impegnato da ciascun partner: somma degli importi delle IF di quel fornitore nella vista.',
-    sorgenti: 'interventi.importo, interventi.fornitore',
+      'Valore impegnato da ciascun partner: l’importo di ogni IF è ripartito fra le aziende che eseguono le sue righe di Oggetto Fornitura, come nel quadro contrattuale dell’Aggregatore. Un IF senza righe di fornitura complete va per intero al suo fornitore.',
+    sorgenti: 'interventi.importo, interventi.fornitore, fornitura_righe.fornitore, fornitura_righe.costo_complessivo',
   },
   {
     pagina: '2 Quote RTI',
@@ -485,7 +485,7 @@ export const FORMULA_CATALOG: FormulaRow[] = [
     pagina: '4 Distribuzione',
     sezione: '4b — Per Referente ARIA',
     elemento: '€ per referente e per azienda RTI',
-    formula: 'valore[ref][p] = Σ importo delle IF con ref_aria = k e fornitore = p, per OGNI partner p di rti.partners',
+    formula: 'valore[ref][p] = Σ importo × frazione_p delle IF con ref_aria = k, per OGNI partner p di rti.partners (frazione come in «Impegnato per partner»)',
     spiegazione:
       'Valore gestito da ciascun referente per ciascuna azienda dell’RTI (una colonna/segmento per partner, nell’ordine della configurazione). I fornitori non presenti nell’RTI confluiscono in «Fuori RTI».',
     sorgenti: 'interventi.importo, interventi.ref_aria, interventi.fornitore, config RTI (partners)',

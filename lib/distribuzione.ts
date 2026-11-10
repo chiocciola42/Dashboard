@@ -1,6 +1,7 @@
 // Aggregations behind the "Distribuzione IF" panel: by ambito, by ARIA referent
 // and the seniority totals.
 import type { Intervento, Seniority } from './types';
+import { ripartisci, type QuotePartner } from './ripartizionePartner';
 
 export const NON_CLASSIFICATO = 'Non classificato';
 export const NO_REFERENTE = '—';
@@ -24,14 +25,16 @@ export function aggregateByAmbito(IFs: Intervento[]): [string, AmbitoAgg][] {
 
 // Value per ARIA referent split across ALL the RTI companies (`partnerNames`, in
 // configuration order) plus "fuori RTI" for any other supplier; biggest total first.
-export function aggregateByReferente(IFs: Intervento[], partnerNames: readonly string[]): [string, RefAgg][] {
+export function aggregateByReferente(IFs: Intervento[], partnerNames: readonly string[], quote?: QuotePartner): [string, RefAgg][] {
   const known = new Set(partnerNames);
   const agg: Record<string, RefAgg> = {};
   for (const i of IFs) {
     const k = i.ref_aria || NO_REFERENTE;
     const o = (agg[k] = agg[k] || { byPartner: Object.fromEntries(partnerNames.map((n) => [n, 0])), fuoriRti: 0, n: 0, tot: 0 });
-    if (known.has(i.fornitore)) o.byPartner[i.fornitore] += i.importo;
-    else o.fuoriRti += i.importo;
+    for (const [azienda, v] of ripartisci(i, quote)) {
+      if (known.has(azienda)) o.byPartner[azienda] += v;
+      else o.fuoriRti += v;
+    }
     o.tot += i.importo;
     o.n++;
   }

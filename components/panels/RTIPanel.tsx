@@ -4,6 +4,7 @@ import type { Intervento, RtiConfig, Meta } from '@/lib/types';
 import { EURM, PCT, C } from '@/lib/format';
 import { legchips } from '@/lib/charts';
 import { computeRtiErosion } from '@/lib/rtiErosion';
+import type { QuotePartner } from '@/lib/ripartizionePartner';
 import { Html } from '../Html';
 import { ChartCard } from '../export/ExportControls';
 import RtiConfigForm from './rti/RtiConfigForm';
@@ -21,6 +22,7 @@ function RTIPanel({
   IFs,
   rti,
   meta,
+  quote,
   quotaVal,
   filtersForn,
   rtiSel,
@@ -31,6 +33,7 @@ function RTIPanel({
   IFs: Intervento[];
   rti: RtiConfig;
   meta: Meta;
+  quote?: QuotePartner;
   quotaVal: Record<string, number>;
   filtersForn?: string;
   rtiSel: string | null;
@@ -38,7 +41,7 @@ function RTIPanel({
   editMode: boolean;
   onUpdateRti: (u: { massimale_totale: number; quota_intellera_pct: number; quota_deloitte_pct: number }) => void;
 }) {
-  const e = computeRtiErosion(IFs, rti, meta, Date.now());
+  const e = computeRtiErosion(IFs, rti, meta, Date.now(), quote);
   const { ceil, quotaErosion, totalRealPct, totalRealEur } = e;
   const selP = rtiSel || (filtersForn && quotaVal[filtersForn] ? filtersForn : null);
 

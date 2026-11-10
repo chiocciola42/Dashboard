@@ -68,7 +68,7 @@ describe('parseAggregatore', () => {
       bdo: '2026330010',
       has_bo: true,
       stato: 'approvato',
-      ambito: 'Macro 3',
+      ambito: null, // «Macro Classe» non è un ambito: senza Anagrafica IF / Ambiti resta non classificato
       fornitore: 'Accenture',
       ref_aria: 'Rossi Mario',
       ref_fornitore: 'Bianchi Luca',
@@ -85,7 +85,7 @@ describe('parseAggregatore', () => {
 
   it('falls back sensibly when the supporting rows are missing', () => {
     const [, due] = parseAggregatore(buf).interventi;
-    expect(due).toMatchObject({ fornitore: 'Deloitte', ambito: 'Altro', has_bo: false, stato: 'non elaborato', modalita_if: null, subappalto: false, subappaltatore: [], costo_subappalto: 0 });
+    expect(due).toMatchObject({ fornitore: 'Deloitte', ambito: null, has_bo: false, stato: 'non elaborato', modalita_if: null, subappalto: false, subappaltatore: [], costo_subappalto: 0 });
   });
 
   it('carries no months and no revenue', () => {
