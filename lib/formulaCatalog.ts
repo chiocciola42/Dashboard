@@ -558,88 +558,52 @@ export const FORMULA_CATALOG: FormulaRow[] = [
   },
   {
     pagina: '9 Controlli',
-    sezione: 'Riconciliazione giornate × tariffa',
-    elemento: 'Costo ricostruito',
-    formula: 'costo = Σ (gg riga × tariffa figura)',
+    sezione: 'Confronti per IF',
+    elemento: 'Valori confrontati',
+    formula: 'Generalità = Importo Previsto dell\'IF; Fornitura = Σ costo complessivo delle linee di «Oggetto Fornitura»; GG × profilo = Σ (gg riga × tariffa del profilo)',
     spiegazione:
-      'Costo di un insieme di righe del GdL: giornate di ciascuna riga per la tariffa di gara della sua figura. Se una sola riga manca di giornate o di tariffa il confronto non è eseguito (mai una somma parziale).',
-    sorgenti: 'gdl_righe.gg, app_config.seniority (tariffa)',
+      'Tre costi per IF, dalla stessa fornitura: le fonti devono coincidere salvo arrotondamenti. Se una sola riga manca di costo, giornate o tariffa il valore non è calcolato (mai una somma parziale).',
+    sorgenti: 'interventi.importo, fornitura_righe.costo_complessivo, gdl_righe.gg, app_config.seniority (tariffa)',
   },
   {
     pagina: '9 Controlli',
-    sezione: 'Riconciliazione giornate × tariffa',
-    elemento: 'Soglia di arrotondamento',
-    formula: 'ammesso = 0,01 € + Σ (0,005 × tariffa riga)',
+    sezione: 'Confronti per IF',
+    elemento: 'Generalità ↔ GG × profilo',
+    formula: 'differenza = Σ gg × tariffa − Importo Previsto',
     spiegazione:
-      'Errore massimo ammesso per un confronto: le giornate nel foglio hanno al massimo 2 decimali, quindi ogni riga è nota a ±0,005 GG. Nessuna soglia percentuale.',
-    sorgenti: 'gdl_righe.gg, app_config.seniority (tariffa)',
+      'Importo Previsto dell\'IF contro il costo ricostruito dalle giornate del GdL per la tariffa di gara del profilo professionale. Soglia: 0,01 € + Σ (0,005 × tariffa riga).',
+    sorgenti: 'interventi.importo, gdl_righe, app_config.seniority',
   },
   {
     pagina: '9 Controlli',
-    sezione: 'Riconciliazione giornate × tariffa',
+    sezione: 'Confronti per IF',
+    elemento: 'Fornitura ↔ Generalità',
+    formula: 'differenza = Importo Previsto − Σ costo complessivo',
+    spiegazione:
+      'Somma dei costi di «Oggetto Fornitura» dell\'IF contro l\'Importo Previsto di Generalità. Soglia 0,05 €.',
+    sorgenti: 'fornitura_righe.costo_complessivo, interventi.importo',
+  },
+  {
+    pagina: '9 Controlli',
+    sezione: 'Confronti per IF',
+    elemento: 'Fornitura ↔ GG × profilo',
+    formula: 'differenza = Σ gg × tariffa − Σ costo complessivo',
+    spiegazione:
+      'Somma dei costi di «Oggetto Fornitura» dell\'IF contro il costo ricostruito dalle giornate × profilo. Stessa soglia di Generalità ↔ GG × profilo.',
+    sorgenti: 'fornitura_righe.costo_complessivo, gdl_righe, app_config.seniority',
+  },
+  {
+    pagina: '9 Controlli',
+    sezione: 'Confronti per IF',
     elemento: 'Esito del confronto',
-    formula: 'differenza = ricostruito − importato; quadra se |differenza| ≤ 0,05 €; arrotondamento se ≤ ammesso; discrepanza altrimenti',
+    formula: 'quadra se |differenza| ≤ 0,05 €; arrotondamento se ≤ soglia; discrepanza altrimenti',
     spiegazione:
-      'Importi e giornate derivano dalla stessa fonte: oltre l\'arrotondamento una differenza indica un errore nelle fonti (o nel calcolo, che i test verificano su casi esatti).',
+      'Nessuna soglia percentuale: oltre l\'arrotondamento una differenza indica un errore nelle fonti. Un confronto con un valore mancante risulta non confrontabile, con il motivo.',
     sorgenti: 'controlli',
   },
   {
     pagina: '9 Controlli',
-    sezione: 'Riconciliazione giornate × tariffa',
-    elemento: 'Non confrontabile',
-    formula: 'giornate mancanti, tariffa mancante o valore importato assente',
-    spiegazione:
-      'Un confronto che non può essere eseguito per intero non viene stimato: risulta non confrontabile, con il motivo.',
-    sorgenti: 'controlli',
-  },
-  {
-    pagina: '9 Controlli',
-    sezione: 'Riconciliazione giornate × tariffa',
-    elemento: 'Livello IF',
-    formula: 'Σ gg × tariffa delle righe GdL dell\'IF contro importo IF',
-    spiegazione:
-      'Confronto sull\'intero IF.',
-    sorgenti: 'gdl_righe, interventi.importo, app_config.seniority',
-  },
-  {
-    pagina: '9 Controlli',
-    sezione: 'Riconciliazione giornate × tariffa',
-    elemento: 'Livello milestone',
-    formula: 'Σ gg × tariffa delle righe (IF, codice) contro Σ costo complessivo delle linee con lo stesso codice',
-    spiegazione:
-      'Rivela errori che a livello IF si compensano (due milestone con costi scambiati).',
-    sorgenti: 'gdl_righe, fornitura_righe.costo_complessivo, app_config.seniority',
-  },
-  {
-    pagina: '9 Controlli',
-    sezione: 'Riconciliazione giornate × tariffa',
-    elemento: 'Livello azienda',
-    formula: 'Σ gg × tariffa delle risorse di un\'azienda in un IF contro Σ costo complessivo delle linee di quel fornitore',
-    spiegazione:
-      'Verifica a quale azienda sono attribuiti giornate e costi dentro uno stesso IF.',
-    sorgenti: 'gdl_righe.azienda, fornitura_righe.fornitore, app_config.seniority',
-  },
-  {
-    pagina: '9 Controlli',
-    sezione: 'Riconciliazione giornate × tariffa',
-    elemento: 'Livello RTI',
-    formula: 'Σ ricostruito degli IF confrontabili contro Σ importo degli stessi IF',
-    spiegazione:
-      'Somma dei soli IF confrontabili, con le soglie sommate. Nella scheda si ricalcola sugli IF della vista filtrata.',
-    sorgenti: 'controlli',
-  },
-  {
-    pagina: '9 Controlli',
-    sezione: 'Riconciliazione giornate × tariffa',
-    elemento: 'Quadratura dell\'import',
-    formula: 'importo IF contro Σ costo complessivo delle linee di «Oggetto Fornitura» dell\'IF',
-    spiegazione:
-      'Controllo sui soli dati importati (senza tariffe): l\'importo dell\'IF è la somma dei costi delle sue linee. Soglia 0,05 €.',
-    sorgenti: 'interventi.importo, fornitura_righe.costo_complessivo',
-  },
-  {
-    pagina: '9 Controlli',
-    sezione: 'Riconciliazione giornate × tariffa',
+    sezione: 'Confronti per IF',
     elemento: 'Tariffe di gara',
     formula: 'tariffa[figura] impostata in app_config (chiave seniority)',
     spiegazione:
