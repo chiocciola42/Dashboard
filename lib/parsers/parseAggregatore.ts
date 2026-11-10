@@ -1,8 +1,10 @@
-import type { Intervento, Seniority } from '../types';
+import type { GdlRiga, Intervento, Seniority } from '../types';
+import { modalitaFromGdl, parseGdl } from './parseGdl';
 import { readWorkbook, sheetRows, findSheet, toNumber, toISODate, str, strId, normalizeFornitore } from './util';
 
 export type AggregatoreResult = {
   seniority: Seniority[];
+  gdl: GdlRiga[];
   interventi: Intervento[];
 };
 
@@ -123,5 +125,10 @@ export function parseAggregatore(input: ArrayBuffer | Buffer): AggregatoreResult
     }
   }
 
-  return { seniority, interventi };
+  // La modalità che "Oggetto Fornitura" non riporta si ricava dai codici del GdL; quella già
+  // presente non viene mai sostituita.
+  const gdl = parseGdl(wb);
+  const modalita = modalitaFromGdl(gdl);
+  const completati = interventi.map((i) => (i.modalita_if ? i : { ...i, modalita_if: modalita.get(i.numero_if) ?? null }));
+  return { seniority, interventi: completati, gdl };
 }

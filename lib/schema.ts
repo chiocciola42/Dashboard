@@ -346,6 +346,21 @@ export const if_risorse = pgTable('if_risorse', {
   tariffa_giornaliera: numeric('tariffa_giornaliera', { precision: 12, scale: 4 }),
 });
 
+// Giornate reali per IF dal foglio "GdL - Gruppo di Lavoro" dell'Aggregatore: una riga per
+// attività, figura professionale e risorsa (lib/gdlStore.ts). Le righe di una stessa
+// figura NON sono duplicati: sono persone diverse e vanno tutte conservate.
+export const gdl_righe = pgTable('gdl_righe', {
+  id: serial('id').primaryKey(),
+  numero_if: text('numero_if').notNull(),
+  codice: text('codice'), // MLS01, CAN02, CONS01 …
+  tipo: text('tipo'), // corpo | canone | consumo
+  descrizione: text('descrizione'),
+  figura: text('figura'),
+  nome_risorsa: text('nome_risorsa'),
+  gg: numeric('gg', { precision: 10, scale: 4 }), // null = mancante
+  azienda: text('azienda'),
+});
+
 // Generic JSON settings store (valori di gara, timeline, tariffe globali …).
 export const app_config = pgTable('app_config', {
   key: text('key').primaryKey(),

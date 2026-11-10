@@ -355,6 +355,23 @@ export type InterventoInput = Partial<
   }
 >;
 
+// Riga del foglio "GdL - Gruppo di Lavoro" dell'Aggregatore: giornate REALI di una
+// figura professionale (o di una risorsa nominata) in un IF. Una riga per attività e
+// figura: più persone della stessa figura danno più righe identiche, che NON vanno unite.
+// Il tipo si deduce dal prefisso del codice: MLS = milestone (a corpo), CAN = canone,
+// CONS = consulenza a misura (risorse nominate).
+export type GdlTipo = 'corpo' | 'canone' | 'consumo';
+export type GdlRiga = {
+  numero_if: string;
+  codice: string | null; // es. MLS01, CAN02, CONS01
+  tipo: GdlTipo | null; // null se il prefisso del codice non è riconosciuto
+  descrizione: string | null;
+  figura: string | null;
+  nome_risorsa: string | null;
+  gg: number | null; // null = mancante o non numerico: mai convertito in 0
+  azienda: string | null; // partner RTI (nome canonico) o ragione sociale se sconosciuta
+};
+
 // Per-IF/BO resource allocation row (figure professionali, gruppi, giorni uomo).
 export type IfRisorsa = {
   id?: number;

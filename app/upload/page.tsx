@@ -41,6 +41,8 @@ type Result = {
   report_pdc_saved?: number;
   report_pdc_ignored?: number;
   seniority_rows?: number;
+  gdl_saved?: number;
+  gdl_ifs?: string[];
   errors?: string[];
   error?: string;
 };
@@ -128,6 +130,7 @@ export default function UploadPage() {
           verbaliSal: parsed.verbaliSal,
           reportPdc: parsed.reportPdc,
           seniority: parsed.seniority,
+          gdl: parsed.gdl,
           filename: file.name,
         }),
       }, UPLOAD_FETCH_TIMEOUT_MS);
@@ -336,6 +339,15 @@ export default function UploadPage() {
                   <span>Figure professionali (GdL)</span>
                   <b>{result.seniority_rows}</b>
                 </div>
+              )}
+              {!!result.gdl_saved && (
+                <>
+                  <div className="row">
+                    <span>Giornate per IF e risorsa (GdL)</span>
+                    <b>{result.gdl_saved}</b>
+                  </div>
+                  <IfList label="IF con giornate aggiornate" ids={result.gdl_ifs ?? []} />
+                </>
               )}
               {result.errors?.map((e, i) => (
                 <div className="row" key={i}>

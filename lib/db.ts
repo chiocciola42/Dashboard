@@ -353,6 +353,18 @@ export const DDL: string[] = [
     "gg" numeric(10, 2),
     "tariffa_giornaliera" numeric(12, 4)
   )`,
+  `CREATE TABLE IF NOT EXISTS "gdl_righe" (
+    "id" serial PRIMARY KEY NOT NULL,
+    "numero_if" text NOT NULL,
+    "codice" text,
+    "tipo" text,
+    "descrizione" text,
+    "figura" text,
+    "nome_risorsa" text,
+    "gg" numeric(10, 4),
+    "azienda" text,
+    CONSTRAINT "gdl_righe_tipo_check" CHECK ("tipo" IS NULL OR "tipo" IN ('corpo', 'canone', 'consumo'))
+  )`,
   `CREATE TABLE IF NOT EXISTS "app_config" (
     "key" text PRIMARY KEY NOT NULL,
     "value" jsonb,
@@ -369,6 +381,7 @@ export const DDL: string[] = [
   // Per-IF lookups (admin editors, BEF upsert) filter on numero_if.
   `CREATE INDEX IF NOT EXISTS "bef_records_numero_if_idx" ON "bef_records" ("numero_if")`,
   `CREATE INDEX IF NOT EXISTS "if_risorse_numero_if_idx" ON "if_risorse" ("numero_if")`,
+  `CREATE INDEX IF NOT EXISTS "gdl_righe_numero_if_idx" ON "gdl_righe" ("numero_if")`,
   // Monthly-detail lookups (Dettaglio IF drill-down) filter on num_bdo.
   `CREATE INDEX IF NOT EXISTS "report_pdc_num_bdo_idx" ON "report_pdc" ("num_bdo")`,
   `CREATE INDEX IF NOT EXISTS "verbali_sal_num_bdo_idx" ON "verbali_sal" ("num_bdo")`,
@@ -578,12 +591,14 @@ export const DDL: string[] = [
 //       periodo_pdc, codice_pdc). Con la chiave a tre campi due PDC distinti per
 //       la stessa posizione e lo stesso periodo facevano fallire l'intero import
 //       ("ON CONFLICT DO UPDATE command cannot affect row a second time")
+//  11 — nuova tabella gdl_righe: giornate reali per IF, attività, figura e risorsa
+//       dal foglio "GdL - Gruppo di Lavoro" dell'Aggregatore (lib/gdlStore.ts)
 // Exported so cached payloads assembled from these tables can key off it: a
 // bootstrap that rewrites existing rows (the DATE_ID_REPAIRS above) changes what
 // a read returns without going through any app write path, so nothing calls
 // `revalidateTag`. Cache keys that include this version rebuild on the bump
 // instead of serving data assembled before the repair — see lib/getDashboardData.ts.
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 const SCHEMA_VERSION_KEY = 'schema_version';
 
 // Anything that can run a raw SQL statement: the neon-http drizzle client in
