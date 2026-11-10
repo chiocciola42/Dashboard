@@ -1,7 +1,11 @@
-// Riconciliazione fra valori RICOSTRUITI (giornate × tariffa di gara) e valori IMPORTATI (importo
-// dell'IF, costi di "Oggetto Fornitura"). Importi e giornate derivano dalla stessa fonte, quindi
-// devono coincidere salvo arrotondamenti: una differenza oltre la soglia è un errore nelle fonti
-// (o nel calcolo, che i test verificano su casi esatti). Nessuna soglia percentuale.
+// Riconciliazione per IF fra tre valori di costo:
+//   Generalità  = Importo Previsto dell'intervento (foglio «Generalità»);
+//   Fornitura   = Σ costi di «Oggetto Fornitura»;
+//   GG × profilo = Σ giornate × tariffa di gara del profilo professionale (foglio GdL).
+// Tre confronti, nient'altro, sulle tre colonne nell'ordine Generalità, GG × profilo, Fornitura:
+// ogni differenza è «colonna di destra − colonna di sinistra».
+// Le fonti descrivono la stessa fornitura, quindi devono coincidere salvo arrotondamenti: una
+// differenza oltre la soglia è un errore nelle fonti. Nessuna soglia percentuale.
 //
 // Modulo puro: nessun accesso a DB, rete o orologio. Le tariffe arrivano dall'esterno (app_config)
 // e qui non si modificano mai.
@@ -17,20 +21,26 @@ export const SOGLIA_QUADRA = 0.05;
 export const GG_ERRORE_MAX = 0.005;
 const CENTESIMO = 0.01;
 
-export type Livello = 'milestone' | 'azienda' | 'if' | 'rti' | 'dati';
+export type Confronto = 'gen_gg' | 'gen_forn' | 'gg_forn';
 export type Stato = 'quadra' | 'arrotondamento' | 'discrepanza' | 'non_confrontabile';
 
+// Etichette dei due termini di ogni confronto: `secondo − primo` è la differenza.
+export const CONFRONTI: Record<Confronto, { label: string; primo: string; secondo: string }> = {
+  gen_gg: { label: 'Generalità ↔ GG × profilo', primo: 'Generalità (Importo Previsto)', secondo: 'Σ gg × tariffa' },
+  gen_forn: { label: 'Generalità ↔ Fornitura', primo: 'Generalità (Importo Previsto)', secondo: 'Σ Oggetto Fornitura' },
+  gg_forn: { label: 'GG × profilo ↔ Fornitura', primo: 'Σ gg × tariffa', secondo: 'Σ Oggetto Fornitura' },
+};
+
 export type Esito = {
-  livello: Livello;
-  numero_if: string | null; // null per il livello RTI
-  chiave: string; // codice milestone, azienda, figura… ("" se non serve)
+  confronto: Confronto;
+  numero_if: string;
   controllo: string;
-  importato: number | null;
-  ricostruito: number | null;
-  differenza: number | null; // ricostruito − importato, in centesimi
-  ammesso: number | null; // soglia di arrotondamento dell'entità
+  primo: number | null;
+  secondo: number | null;
+  differenza: number | null; // secondo − primo, in centesimi
+  ammesso: number | null; // soglia di arrotondamento
   stato: Stato;
-  motivo: string | null; // perché non confrontabile, o nota
+  motivo: string | null; // perché non confrontabile
 };
 
 export type IfValore = { numero_if: string; importo: number };
@@ -132,49 +142,47 @@ export function ricostruisci(righe: readonly GdlRiga[], tariffe: Tariffe): Ricos
   return { ok: true, ricostruito: arrotonda(ricostruito), ammesso: arrotonda(ammesso) };
 }
 
-type Meta = Pick<Esito, 'livello' | 'numero_if' | 'chiave' | 'controllo'>;
+type Meta = Pick<Esito, 'confronto' | 'numero_if' | 'controllo'>;
 
-const nonConfrontabile = (m: Meta, importato: number | null, motivo: string): Esito => ({
+const meta = (confronto: Confronto, numero_if: string): Meta => ({
+  confronto,
+  numero_if,
+  controllo: `${CONFRONTI[confronto].primo} contro ${CONFRONTI[confronto].secondo}`,
+});
+
+const nonConfrontabile = (m: Meta, primo: number | null, secondo: number | null, motivo: string): Esito => ({
   ...m,
-  importato,
-  ricostruito: null,
+  primo,
+  secondo,
   differenza: null,
   ammesso: null,
   stato: 'non_confrontabile',
   motivo,
 });
 
-// Confronto fra un valore importato (se presente) e la ricostruzione di un gruppo di righe.
-export function confronta(m: Meta, importato: number | null, ric: Ricostruzione, motivoMancante: string): Esito {
-  if (importato == null) return nonConfrontabile(m, null, motivoMancante);
-  if (!ric.ok) return nonConfrontabile(m, arrotonda(importato), ric.motivo);
-  const differenza = arrotonda(ric.ricostruito - importato);
-  return {
-    ...m,
-    importato: arrotonda(importato),
-    ricostruito: ric.ricostruito,
-    differenza,
-    ammesso: ric.ammesso,
-    stato: classifica(differenza, ric.ammesso),
-    motivo: null,
-  };
+// Confronto fra due valori; il motivo dipende da quale dei due manca.
+function confronta(m: Meta, primo: number | null, secondo: number | null, ammesso: number, motivoPrimo: string, motivoSecondo: string): Esito {
+  const p = primo == null ? null : arrotonda(primo);
+  const sec = secondo == null ? null : arrotonda(secondo);
+  if (p == null) return nonConfrontabile(m, p, sec, motivoPrimo);
+  if (sec == null) return nonConfrontabile(m, p, sec, motivoSecondo);
+  const differenza = arrotonda(sec - p);
+  return { ...m, primo: p, secondo: sec, differenza, ammesso, stato: classifica(differenza, ammesso), motivo: null };
 }
 
-// ---------------------------------------------------------------------------------------------
-// Raggruppamenti
-// ---------------------------------------------------------------------------------------------
-function raggruppa<T>(righe: readonly T[], chiave: (r: T) => string | null): Map<string, T[]> {
+function raggruppa<T>(righe: readonly T[], chiave: (r: T) => string): Map<string, T[]> {
   const m = new Map<string, T[]>();
   for (const r of righe) {
     const k = chiave(r);
-    if (k == null) continue;
-    m.set(k, [...(m.get(k) ?? []), r]);
+    const g = m.get(k);
+    if (g) g.push(r);
+    else m.set(k, [r]);
   }
   return m;
 }
 
 // Somma dei costi di un gruppo di linee; null se non ci sono linee o se UNA ha il costo mancante
-// (una somma parziale darebbe un importato falso).
+// (una somma parziale darebbe un valore falso).
 function sommaCosti(linee: readonly FornituraRiga[] | undefined): number | null {
   if (!linee || linee.length === 0) return null;
   let tot = 0;
@@ -185,123 +193,21 @@ function sommaCosti(linee: readonly FornituraRiga[] | undefined): number | null 
   return tot;
 }
 
-const SEP = '\u0000';
-const kMs = (numeroIf: string, codice: string): string => `${numeroIf}${SEP}${codice}`;
-
-// ---------------------------------------------------------------------------------------------
-// Livelli
-// ---------------------------------------------------------------------------------------------
-function esitiIf(inp: RiconciliazioneInput, tariffe: Tariffe): Esito[] {
-  const perIf = raggruppa(inp.gdl, (r) => r.numero_if);
-  return inp.interventi.map((i) =>
-    confronta(
-      { livello: 'if', numero_if: i.numero_if, chiave: '', controllo: 'Σ gg × tariffa contro importo IF' },
-      i.importo,
-      ricostruisci(perIf.get(i.numero_if) ?? [], tariffe),
-      'importo IF assente',
-    ),
-  );
+// I tre confronti di un IF. Con la ricostruzione GG × profilo non eseguibile (giornate o tariffe
+// mancanti) i due confronti che la usano sono "non confrontabili" con il motivo.
+function esitiIf(numeroIf: string, previsto: number, costi: number | null, ric: Ricostruzione): Esito[] {
+  const gg = ric.ok ? ric.ricostruito : null;
+  const ammessoGg = ric.ok ? ric.ammesso : 0;
+  const motivoGg = ric.ok ? '' : ric.motivo;
+  const motivoForn = 'costi di fornitura assenti o incompleti';
+  return [
+    confronta(meta('gen_gg', numeroIf), previsto, gg, ammessoGg, 'importo previsto assente', motivoGg),
+    confronta(meta('gen_forn', numeroIf), previsto, costi, SOGLIA_QUADRA, 'importo previsto assente', motivoForn),
+    confronta(meta('gg_forn', numeroIf), gg, costi, ammessoGg, motivoGg, motivoForn),
+  ];
 }
 
-function esitiMilestone(inp: RiconciliazioneInput, tariffe: Tariffe): Esito[] {
-  const righe = raggruppa(inp.gdl, (r) => (r.codice ? kMs(r.numero_if, r.codice) : null));
-  const costi = raggruppa(inp.fornitura, (l) => (l.codice ? kMs(l.numero_if, l.codice) : null));
-  const out: Esito[] = [];
-  for (const [k, gruppo] of righe) {
-    const [numeroIf, codice] = k.split(SEP);
-    out.push(
-      confronta(
-        { livello: 'milestone', numero_if: numeroIf, chiave: codice, controllo: 'Σ gg × tariffa contro costo milestone' },
-        sommaCosti(costi.get(k)),
-        ricostruisci(gruppo, tariffe),
-        'costo della milestone assente in «Oggetto Fornitura»',
-      ),
-    );
-  }
-  return out;
-}
-
-function esitiAzienda(inp: RiconciliazioneInput, tariffe: Tariffe): Esito[] {
-  const righe = raggruppa(inp.gdl, (r) => (r.azienda ? kMs(r.numero_if, r.azienda) : null));
-  const costi = raggruppa(inp.fornitura, (l) => (l.fornitore ? kMs(l.numero_if, l.fornitore) : null));
-  const out: Esito[] = [];
-  for (const [k, gruppo] of righe) {
-    const [numeroIf, azienda] = k.split(SEP);
-    out.push(
-      confronta(
-        { livello: 'azienda', numero_if: numeroIf, chiave: azienda, controllo: 'Σ gg × tariffa contro costo azienda' },
-        sommaCosti(costi.get(k)),
-        ricostruisci(gruppo, tariffe),
-        "nessun costo per l'azienda in «Oggetto Fornitura»",
-      ),
-    );
-  }
-  return out;
-}
-
-const confrontabile = (e: Esito): boolean => e.stato !== 'non_confrontabile';
-
-// Somma degli IF ricostruibili: importato, ricostruito e soglie si sommano.
-export function esitoRti(esitiDegliIf: readonly Esito[]): Esito {
-  const meta: Meta = { livello: 'rti', numero_if: null, chiave: '', controllo: 'Σ IF ricostruiti contro Σ importi' };
-  const ok = esitiDegliIf.filter(confrontabile);
-  if (ok.length === 0) return nonConfrontabile(meta, null, 'nessun IF confrontabile');
-  const somma = (f: (e: Esito) => number | null): number => ok.reduce((s, e) => s + (f(e) ?? 0), 0);
-  const importato = arrotonda(somma((e) => e.importato));
-  const ricostruito = arrotonda(somma((e) => e.ricostruito));
-  const ammesso = arrotonda(somma((e) => e.ammesso));
-  const differenza = arrotonda(ricostruito - importato);
-  return {
-    ...meta,
-    importato,
-    ricostruito,
-    differenza,
-    ammesso,
-    stato: classifica(differenza, ammesso),
-    motivo: `${ok.length} IF confrontabili su ${esitiDegliIf.length}`,
-  };
-}
-
-// Controlli sui dati importati, senza tariffe: l'importo dell'IF deve essere la somma dei costi delle
-// sue linee di fornitura, e le linee senza codice non entrano nel confronto per milestone.
-function esitiDati(inp: RiconciliazioneInput): Esito[] {
-  const perIf = raggruppa(inp.fornitura, (l) => l.numero_if);
-  const out: Esito[] = inp.interventi.map((i) => {
-    const meta: Meta = { livello: 'dati', numero_if: i.numero_if, chiave: '', controllo: 'Importo IF contro Σ costi «Oggetto Fornitura»' };
-    const somma = sommaCosti(perIf.get(i.numero_if));
-    if (somma == null) return nonConfrontabile(meta, arrotonda(i.importo), 'costi di fornitura assenti o incompleti');
-    const differenza = arrotonda(somma - i.importo);
-    return {
-      ...meta,
-      importato: arrotonda(i.importo),
-      ricostruito: arrotonda(somma),
-      differenza,
-      ammesso: SOGLIA_QUADRA,
-      stato: classifica(differenza, SOGLIA_QUADRA),
-      motivo: null,
-    };
-  });
-  const senzaCodice = inp.fornitura.filter((l) => !l.codice);
-  if (senzaCodice.length > 0) {
-    const costo = sommaCosti(senzaCodice);
-    out.push(
-      nonConfrontabile(
-        { livello: 'dati', numero_if: null, chiave: '', controllo: 'Linee di fornitura senza codice milestone' },
-        costo == null ? null : arrotonda(costo),
-        `${senzaCodice.length} ${senzaCodice.length === 1 ? 'linea' : 'linee'}: non attribuibili a una milestone`,
-      ),
-    );
-  }
-  const gdlIf = new Set(inp.gdl.map((r) => r.numero_if));
-  const noti = new Set(inp.interventi.map((i) => i.numero_if));
-  for (const id of [...gdlIf].filter((x) => !noti.has(x)).sort()) {
-    out.push(nonConfrontabile({ livello: 'dati', numero_if: null, chiave: id, controllo: 'IF del GdL assente in «Generalità»' }, null, 'IF non presente in portafoglio'));
-  }
-  return out;
-}
-
-// Figure con giornate nel GdL ma senza tariffa: servono per spiegare perché molti confronti non sono
-// possibili.
+// Figure con giornate nel GdL ma senza tariffa: spiegano perché molti confronti non sono possibili.
 function figureSenzaTariffa(gdl: readonly GdlRiga[], tariffe: Tariffe): string[] {
   const out = new Set<string>();
   for (const r of gdl) {
@@ -327,20 +233,20 @@ export function controlliDa(inp: RiconciliazioneInput): Controlli {
 export function riconcilia(inp: RiconciliazioneInput): Riconciliazione {
   assertInput(inp);
   const tariffe = tariffeDa(inp.seniority);
-  const perIf = esitiIf(inp, tariffe);
-  return {
-    esiti: [...perIf, ...esitiMilestone(inp, tariffe), ...esitiAzienda(inp, tariffe), esitoRti(perIf), ...esitiDati(inp)],
-    tariffeMancanti: figureSenzaTariffa(inp.gdl, tariffe),
-    righe: { gdl: inp.gdl.length, fornitura: inp.fornitura.length },
-  };
+  const gdl = raggruppa(inp.gdl, (r) => r.numero_if);
+  const forn = raggruppa(inp.fornitura, (l) => l.numero_if);
+  const esiti = inp.interventi.flatMap((i) =>
+    esitiIf(i.numero_if, i.importo, sommaCosti(forn.get(i.numero_if)), ricostruisci(gdl.get(i.numero_if) ?? [], tariffe)),
+  );
+  return { esiti, tariffeMancanti: figureSenzaTariffa(inp.gdl, tariffe), righe: { gdl: inp.gdl.length, fornitura: inp.fornitura.length } };
 }
 
-// Conteggio degli esiti per stato, opzionalmente di un solo livello.
+// Conteggio degli esiti per stato, opzionalmente di un solo confronto.
 export type ConteggioStati = Record<Stato, number>;
-export function conta(esiti: readonly Esito[], livello?: Livello): ConteggioStati {
+export function conta(esiti: readonly Esito[], confronto?: Confronto): ConteggioStati {
   const c: ConteggioStati = { quadra: 0, arrotondamento: 0, discrepanza: 0, non_confrontabile: 0 };
   for (const e of esiti) {
-    if (livello && e.livello !== livello) continue;
+    if (confronto && e.confronto !== confronto) continue;
     c[e.stato] += 1;
   }
   return c;
