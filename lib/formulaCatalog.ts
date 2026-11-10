@@ -559,7 +559,7 @@ export const FORMULA_CATALOG: FormulaRow[] = [
   {
     pagina: '9 Controlli',
     sezione: 'Confronti per IF',
-    elemento: 'Valori confrontati',
+    elemento: 'Valori confrontati (vista unica)',
     formula: 'Generalità = Importo Previsto dell\'IF; Fornitura = Σ costo complessivo delle linee di «Oggetto Fornitura»; GG × profilo = Σ (gg riga × tariffa del profilo)',
     spiegazione:
       'Tre costi per IF, dalla stessa fornitura: le fonti devono coincidere salvo arrotondamenti. Se una sola riga manca di costo, giornate o tariffa il valore non è calcolato (mai una somma parziale).',
@@ -577,20 +577,20 @@ export const FORMULA_CATALOG: FormulaRow[] = [
   {
     pagina: '9 Controlli',
     sezione: 'Confronti per IF',
-    elemento: 'Fornitura ↔ Generalità',
-    formula: 'differenza = Importo Previsto − Σ costo complessivo',
+    elemento: 'Generalità ↔ Fornitura',
+    formula: 'differenza = Σ costo complessivo − Importo Previsto',
     spiegazione:
-      'Somma dei costi di «Oggetto Fornitura» dell\'IF contro l\'Importo Previsto di Generalità. Soglia 0,05 €.',
-    sorgenti: 'fornitura_righe.costo_complessivo, interventi.importo',
+      'Importo Previsto di Generalità contro la somma dei costi di «Oggetto Fornitura» dell\'IF. Soglia 0,05 €.',
+    sorgenti: 'interventi.importo, fornitura_righe.costo_complessivo',
   },
   {
     pagina: '9 Controlli',
     sezione: 'Confronti per IF',
-    elemento: 'Fornitura ↔ GG × profilo',
-    formula: 'differenza = Σ gg × tariffa − Σ costo complessivo',
+    elemento: 'GG × profilo ↔ Fornitura',
+    formula: 'differenza = Σ costo complessivo − Σ gg × tariffa',
     spiegazione:
-      'Somma dei costi di «Oggetto Fornitura» dell\'IF contro il costo ricostruito dalle giornate × profilo. Stessa soglia di Generalità ↔ GG × profilo.',
-    sorgenti: 'fornitura_righe.costo_complessivo, gdl_righe, app_config.seniority',
+      'Costo ricostruito dalle giornate × profilo contro la somma dei costi di «Oggetto Fornitura» dell\'IF. Stessa soglia di Generalità ↔ GG × profilo.',
+    sorgenti: 'gdl_righe, app_config.seniority, fornitura_righe.costo_complessivo',
   },
   {
     pagina: '9 Controlli',

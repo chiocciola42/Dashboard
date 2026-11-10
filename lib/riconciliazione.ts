@@ -2,7 +2,8 @@
 //   Generalità  = Importo Previsto dell'intervento (foglio «Generalità»);
 //   Fornitura   = Σ costi di «Oggetto Fornitura»;
 //   GG × profilo = Σ giornate × tariffa di gara del profilo professionale (foglio GdL).
-// Tre confronti, nient'altro: Generalità↔GG×profilo, Fornitura↔Generalità, Fornitura↔GG×profilo.
+// Tre confronti, nient'altro, sulle tre colonne nell'ordine Generalità, GG × profilo, Fornitura:
+// ogni differenza è «colonna di destra − colonna di sinistra».
 // Le fonti descrivono la stessa fornitura, quindi devono coincidere salvo arrotondamenti: una
 // differenza oltre la soglia è un errore nelle fonti. Nessuna soglia percentuale.
 //
@@ -20,14 +21,14 @@ export const SOGLIA_QUADRA = 0.05;
 export const GG_ERRORE_MAX = 0.005;
 const CENTESIMO = 0.01;
 
-export type Confronto = 'gen_gg' | 'forn_gen' | 'forn_gg';
+export type Confronto = 'gen_gg' | 'gen_forn' | 'gg_forn';
 export type Stato = 'quadra' | 'arrotondamento' | 'discrepanza' | 'non_confrontabile';
 
-// Etichette dei due termini di ogni confronto, nell'ordine in cui il controllo li nomina.
+// Etichette dei due termini di ogni confronto: `secondo − primo` è la differenza.
 export const CONFRONTI: Record<Confronto, { label: string; primo: string; secondo: string }> = {
-  gen_gg: { label: 'Generalità ↔ GG × profilo', primo: 'Generalità (Importo Previsto)', secondo: 'GG × profilo' },
-  forn_gen: { label: 'Fornitura ↔ Generalità', primo: 'Σ Oggetto Fornitura', secondo: 'Generalità (Importo Previsto)' },
-  forn_gg: { label: 'Fornitura ↔ GG × profilo', primo: 'Σ Oggetto Fornitura', secondo: 'GG × profilo' },
+  gen_gg: { label: 'Generalità ↔ GG × profilo', primo: 'Generalità (Importo Previsto)', secondo: 'Σ gg × tariffa' },
+  gen_forn: { label: 'Generalità ↔ Fornitura', primo: 'Generalità (Importo Previsto)', secondo: 'Σ Oggetto Fornitura' },
+  gg_forn: { label: 'GG × profilo ↔ Fornitura', primo: 'Σ gg × tariffa', secondo: 'Σ Oggetto Fornitura' },
 };
 
 export type Esito = {
@@ -201,8 +202,8 @@ function esitiIf(numeroIf: string, previsto: number, costi: number | null, ric: 
   const motivoForn = 'costi di fornitura assenti o incompleti';
   return [
     confronta(meta('gen_gg', numeroIf), previsto, gg, ammessoGg, 'importo previsto assente', motivoGg),
-    confronta(meta('forn_gen', numeroIf), costi, previsto, SOGLIA_QUADRA, motivoForn, 'importo previsto assente'),
-    confronta(meta('forn_gg', numeroIf), costi, gg, ammessoGg, motivoForn, motivoGg),
+    confronta(meta('gen_forn', numeroIf), previsto, costi, SOGLIA_QUADRA, 'importo previsto assente', motivoForn),
+    confronta(meta('gg_forn', numeroIf), gg, costi, ammessoGg, motivoGg, motivoForn),
   ];
 }
 

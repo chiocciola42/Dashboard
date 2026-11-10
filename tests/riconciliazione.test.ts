@@ -110,10 +110,10 @@ const trova = (esiti: Esito[], confronto: Confronto, numeroIf: string): Esito =>
 describe('riconcilia — i tre confronti per IF', () => {
   it('REGRESSION: an IF whose Generalità, Σ Oggetto Fornitura and Σ gg × profilo are the same squares on all three', () => {
     const r = riconcilia(input({ interventi: [{ numero_if: '488', importo: 41151.82 }], gdl: MLS01, fornitura: [f('488', 'MLS01', 41151.82)] }));
-    expect(r.esiti.map((e) => e.confronto)).toEqual(['gen_gg', 'forn_gen', 'forn_gg']);
+    expect(r.esiti.map((e) => e.confronto)).toEqual(['gen_gg', 'gen_forn', 'gg_forn']);
     expect(trova(r.esiti, 'gen_gg', '488')).toMatchObject({ stato: 'quadra', primo: 41151.82, secondo: 41151.82, differenza: 0 });
-    expect(trova(r.esiti, 'forn_gen', '488')).toMatchObject({ stato: 'quadra', primo: 41151.82, secondo: 41151.82 });
-    expect(trova(r.esiti, 'forn_gg', '488')).toMatchObject({ stato: 'quadra' });
+    expect(trova(r.esiti, 'gen_forn', '488')).toMatchObject({ stato: 'quadra', primo: 41151.82, secondo: 41151.82 });
+    expect(trova(r.esiti, 'gg_forn', '488')).toMatchObject({ stato: 'quadra' });
   });
 
   it('REGRESSION: days for 9 months against costs and amount for 6 months: only the two comparisons with gg × profilo fail (IF 20260541)', () => {
@@ -125,40 +125,40 @@ describe('riconcilia — i tre confronti per IF', () => {
       }),
     );
     expect(trova(r.esiti, 'gen_gg', '541')).toMatchObject({ stato: 'discrepanza', primo: 8010.6, secondo: 12015.9, differenza: 4005.3 });
-    expect(trova(r.esiti, 'forn_gen', '541')).toMatchObject({ stato: 'quadra' });
-    expect(trova(r.esiti, 'forn_gg', '541')).toMatchObject({ stato: 'discrepanza', primo: 8010.6, secondo: 12015.9, differenza: 4005.3 });
+    expect(trova(r.esiti, 'gen_forn', '541')).toMatchObject({ stato: 'quadra' });
+    expect(trova(r.esiti, 'gg_forn', '541')).toMatchObject({ stato: 'discrepanza', primo: 12015.9, secondo: 8010.6, differenza: -4005.3 });
   });
 
-  it('Fornitura ↔ Generalità: the difference is secondo − primo = Generalità − Σ costi, tolerance 0,05 €', () => {
+  it('Generalità ↔ Fornitura: the difference is secondo − primo = Σ costi − Generalità, tolerance 0,05 €', () => {
     const r = riconcilia(input({ interventi: [{ numero_if: 'B', importo: 100 }], fornitura: [f('B', 'MLS01', 60), f('B', 'MLS02', 30)] }));
-    expect(trova(r.esiti, 'forn_gen', 'B')).toMatchObject({ stato: 'discrepanza', primo: 90, secondo: 100, differenza: 10, ammesso: 0.05 });
+    expect(trova(r.esiti, 'gen_forn', 'B')).toMatchObject({ stato: 'discrepanza', primo: 100, secondo: 90, differenza: -10, ammesso: 0.05 });
     const q = riconcilia(input({ interventi: [{ numero_if: 'B', importo: 100.04 }], fornitura: [f('B', 'MLS01', 100)] }));
-    expect(trova(q.esiti, 'forn_gen', 'B').stato).toBe('quadra');
+    expect(trova(q.esiti, 'gen_forn', 'B').stato).toBe('quadra');
   });
 
   it('the cost lines of an IF are summed, including lines without milestone code', () => {
     const r = riconcilia(input({ interventi: [{ numero_if: 'A', importo: 100 }], fornitura: [f('A', 'MLS01', 60), f('A', null, 40)] }));
-    expect(trova(r.esiti, 'forn_gen', 'A')).toMatchObject({ stato: 'quadra', primo: 100 });
+    expect(trova(r.esiti, 'gen_forn', 'A')).toMatchObject({ stato: 'quadra', primo: 100 });
   });
 
   it('REGRESSION: a rounding of the days (33,33 instead of 33,3333) is absorbed by the allowance, not reported', () => {
     // importo vero = 100/3 GG × 346,09 = 11.536,33; il foglio riporta 33,33 GG
     const r = riconcilia(input({ interventi: [{ numero_if: 'R', importo: 11536.33 }], gdl: [g('R', 'MLS01', 'Health Care Consultant Senior', 33.33)], fornitura: [f('R', 'MLS01', 11536.33)] }));
     expect(trova(r.esiti, 'gen_gg', 'R')).toMatchObject({ stato: 'arrotondamento' });
-    expect(trova(r.esiti, 'forn_gg', 'R')).toMatchObject({ stato: 'arrotondamento' });
+    expect(trova(r.esiti, 'gg_forn', 'R')).toMatchObject({ stato: 'arrotondamento' });
     expect((trova(r.esiti, 'gen_gg', 'R').differenza as number) < 0).toBe(true);
   });
 
   it('without cost lines the two comparisons with Oggetto Fornitura are not comparable; the third still runs', () => {
     const r = riconcilia(input({ interventi: [{ numero_if: '488', importo: 41151.82 }], gdl: MLS01 }));
     expect(trova(r.esiti, 'gen_gg', '488').stato).toBe('quadra');
-    expect(trova(r.esiti, 'forn_gen', '488')).toMatchObject({ stato: 'non_confrontabile', primo: null, secondo: 41151.82, motivo: 'costi di fornitura assenti o incompleti' });
-    expect(trova(r.esiti, 'forn_gg', '488')).toMatchObject({ stato: 'non_confrontabile', primo: null, motivo: 'costi di fornitura assenti o incompleti' });
+    expect(trova(r.esiti, 'gen_forn', '488')).toMatchObject({ stato: 'non_confrontabile', primo: 41151.82, secondo: null, motivo: 'costi di fornitura assenti o incompleti' });
+    expect(trova(r.esiti, 'gg_forn', '488')).toMatchObject({ stato: 'non_confrontabile', primo: 41151.82, secondo: null, motivo: 'costi di fornitura assenti o incompleti' });
   });
 
   it('a cost line without cost makes the whole sum unusable: never a partial sum', () => {
     const r = riconcilia(input({ interventi: [{ numero_if: 'C', importo: 100 }], fornitura: [f('C', 'MLS01', 60), f('C', 'MLS02', null)] }));
-    expect(trova(r.esiti, 'forn_gen', 'C')).toMatchObject({ stato: 'non_confrontabile', primo: null });
+    expect(trova(r.esiti, 'gen_forn', 'C')).toMatchObject({ stato: 'non_confrontabile', primo: 100, secondo: null });
   });
 
   it('an IF without GdL rows, with missing days or without a tariff: only the comparisons using gg × profilo are not comparable, with the reason', () => {
@@ -170,9 +170,9 @@ describe('riconcilia — i tre confronti per IF', () => {
       }),
     );
     expect(trova(r.esiti, 'gen_gg', 'A')).toMatchObject({ stato: 'non_confrontabile', motivo: 'nessuna riga GdL', primo: 10, secondo: null });
-    expect(trova(r.esiti, 'forn_gg', 'B')).toMatchObject({ stato: 'non_confrontabile', motivo: 'giornate mancanti (1 riga)', primo: 20 });
+    expect(trova(r.esiti, 'gg_forn', 'B')).toMatchObject({ stato: 'non_confrontabile', motivo: 'giornate mancanti (1 riga)', primo: null, secondo: 20 });
     expect(trova(r.esiti, 'gen_gg', 'C')).toMatchObject({ stato: 'non_confrontabile', motivo: 'tariffa mancante: Project Manager' });
-    for (const id of ['A', 'B', 'C']) expect(trova(r.esiti, 'forn_gen', id).stato).toBe('quadra');
+    for (const id of ['A', 'B', 'C']) expect(trova(r.esiti, 'gen_forn', id).stato).toBe('quadra');
     expect(r.tariffeMancanti).toEqual(['Project Manager']);
   });
 
@@ -189,7 +189,7 @@ describe('riconcilia — i tre confronti per IF', () => {
 
   it('conta counts outcomes by state, optionally for one comparison', () => {
     const r = riconcilia(input({ interventi: [{ numero_if: '541', importo: 8010.6 }], gdl: [g('541', 'CAN01', 'Business Consultant Senior', 45)], fornitura: [f('541', 'CAN01', 8010.6)] }));
-    expect(conta(r.esiti, 'forn_gen')).toEqual({ quadra: 1, arrotondamento: 0, discrepanza: 0, non_confrontabile: 0 });
+    expect(conta(r.esiti, 'gen_forn')).toEqual({ quadra: 1, arrotondamento: 0, discrepanza: 0, non_confrontabile: 0 });
     expect(conta(r.esiti, 'gen_gg').discrepanza).toBe(1);
     expect(Object.values(conta(r.esiti)).reduce((n, x) => n + x, 0)).toBe(r.esiti.length);
   });
