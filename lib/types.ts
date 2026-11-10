@@ -312,6 +312,7 @@ export type MonthFact = {
 
 // Aggregated payload returned by GET /api/data
 import type { Controlli } from './riconciliazione';
+import type { QuotePartner } from './ripartizionePartner';
 
 export type DashboardData = {
   // Calendar year the per-intervento monthly profiles refer to, and the years
@@ -331,6 +332,8 @@ export type DashboardData = {
   bef_fatturabile: BefFatturabile;
   bef_aggregates: BefAggregates;
   controlli: Controlli;
+  // Ripartizione dell'importo di ogni IF fra le aziende dell'RTI (da Oggetto Fornitura).
+  quote_partner?: QuotePartner;
   kpi: Kpi;
   revenue_mensile: { mese: string; intellera: number; deloitte: number }[];
   distribuzione_ambito: { ambito: string; count: number; valore: number }[];

@@ -7,6 +7,7 @@ import { listAllBef, computeBefMonthlyTotals, computeBefFatturabileMonthly, comp
 import { listAllGdl } from './gdlStore';
 import { listAllFornitura } from './fornituraStore';
 import { controlliDa } from './riconciliazione';
+import { quotePerIf } from './ripartizionePartner';
 import { getSettingsBulk } from './settings';
 import { timed } from './perf';
 import { SEED_FORNITORI, SEED_RTI, SEED_META, SEED_SENIORITY, SEED_MODALITA, SEED_TIMELINE } from './seed';
@@ -97,6 +98,7 @@ async function assembleDashboardData(
       fornitura,
       seniority: settings.seniority as Seniority[],
     }),
+    quote_partner: quotePerIf(fornitura),
     kpi: computeKpi(all),
     revenue_mensile: revenueMensile(all, anno),
     distribuzione_ambito: distribuzioneAmbito(all),

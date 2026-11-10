@@ -4,6 +4,7 @@
 // No React, no DOM, and the clock is an argument, so every figure is testable.
 import type { Intervento, Meta, RtiConfig } from './types';
 import { C, FCOL, erosionRisk } from './format';
+import { ripartisci, type QuotePartner } from './ripartizionePartner';
 
 // A contract longer than this many calendar years is treated as invalid input
 // (bounds the per-year buckets built below).
@@ -70,13 +71,16 @@ export function contractYears(startYear: number, endYear: number): number[] {
   return Array.from({ length: count }, (_, i) => startYear + i);
 }
 
-// Commitments summed per partner name (partners without IFs stay at 0).
-export function sumByPartner(IFs: Intervento[], rti: RtiConfig): Record<string, number> {
+// Commitments summed per partner name (partners without IFs stay at 0). With `quote`, an IF run
+// by several companies is split between them by the cost of its supply lines.
+export function sumByPartner(IFs: Intervento[], rti: RtiConfig, quote?: QuotePartner): Record<string, number> {
   const impByP: Record<string, number> = {};
   rti.partners.forEach((p) => (impByP[p.name] = 0));
-  IFs.forEach((i) => {
-    if (impByP[i.fornitore] != null) impByP[i.fornitore] += i.importo;
-  });
+  for (const i of IFs) {
+    for (const [azienda, v] of ripartisci(i, quote)) {
+      if (impByP[azienda] != null) impByP[azienda] += v;
+    }
+  }
   return impByP;
 }
 
@@ -94,9 +98,9 @@ export function sumByYear(IFs: Intervento[], years: number[]): Record<number, nu
   return impByYear;
 }
 
-export function computeRtiErosion(IFs: Intervento[], rti: RtiConfig, meta: Meta, nowMs: number): RtiErosion {
+export function computeRtiErosion(IFs: Intervento[], rti: RtiConfig, meta: Meta, nowMs: number, quote?: QuotePartner): RtiErosion {
   const ceil = rti.ceiling;
-  const impByP = sumByPartner(IFs, rti);
+  const impByP = sumByPartner(IFs, rti, quote);
 
   const todayYear = new Date(nowMs).getFullYear();
   let years = contractYears(new Date(meta.contract_date).getFullYear(), new Date(meta.valid_to).getFullYear());

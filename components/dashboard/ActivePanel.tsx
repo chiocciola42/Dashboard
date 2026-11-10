@@ -51,6 +51,7 @@ export default function ActivePanel(p: ActivePanelProps) {
           IFs={IFs}
           rti={p.rti}
           meta={data.meta}
+          quote={data.quote_partner}
           quotaVal={p.quotaVal}
           filtersForn={p.singleForn}
           rtiSel={p.rtiSel}
@@ -71,7 +72,7 @@ export default function ActivePanel(p: ActivePanelProps) {
         />
       );
     case 3:
-      return <DistribuzionePanel IFs={IFs} seniority={data.seniority} partners={p.rti.partners} distSub={p.distSub} setDistSub={p.setDistSub} />;
+      return <DistribuzionePanel IFs={IFs} seniority={data.seniority} partners={p.rti.partners} quote={data.quote_partner} distSub={p.distSub} setDistSub={p.setDistSub} />;
     case 4:
       return <ModalitaPanel interventi={IFs} onDrillMod={p.onDrillMod} />;
     case 5:

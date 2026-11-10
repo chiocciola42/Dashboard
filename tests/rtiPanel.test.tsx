@@ -58,6 +58,16 @@ describe('RTIPanel', () => {
     expect(t).toContain('Residuo € 8,80 Mln');
   });
 
+  it('REGRESSION: an IF split between two companies moves the quota consumed, not the total', () => {
+    const quote = { '1': { Intellera: 0.5, Deloitte: 0.5 } };
+    const plain = renderToStaticMarkup(<RTIPanel {...base} />);
+    const split = renderToStaticMarkup(<RTIPanel {...base} quote={quote} />);
+    expect(text(split)).toContain('Impegnato totale € 1,20 Mln');
+    expect(split).not.toBe(plain);
+    const e = computeRtiErosion(IFs, rti, meta, Date.now(), quote);
+    expect(e.quotaErosion.map((q) => q.realEur)).toEqual([450_000, 750_000]);
+  });
+
   it('only offers the configuration form in edit mode', () => {
     expect(renderToStaticMarkup(<RTIPanel {...base} />)).not.toContain('Configura parametri RTI');
     expect(renderToStaticMarkup(<RTIPanel {...base} editMode />)).toContain('Configura parametri RTI');

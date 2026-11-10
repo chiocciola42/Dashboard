@@ -1,5 +1,7 @@
 import type { Intervento, Kpi, MonthFact, RtiConfig, MultiYearTimeline } from './types';
 import { MESI } from './format';
+import { sumByPartner } from './rtiErosion';
+import type { QuotePartner } from './ripartizionePartner';
 
 // Fornitore matcher tolerant to free-text variants ("Intellera", "Intellera
 // Consulting"): the interventi domain uses the controlled value 'Intellera',
@@ -159,13 +161,8 @@ export function distribuzioneAmbito(IFs: Intervento[]) {
 }
 
 // Impegnato (committed) per RTI partner from the filtered view.
-export function impegnatoPerPartner(IFs: Intervento[], rti: RtiConfig) {
-  const out: Record<string, number> = {};
-  rti.partners.forEach((p) => (out[p.name] = 0));
-  IFs.forEach((i) => {
-    if (out[i.fornitore] != null) out[i.fornitore] += i.importo;
-  });
-  return out;
+export function impegnatoPerPartner(IFs: Intervento[], rti: RtiConfig, quote?: QuotePartner) {
+  return sumByPartner(IFs, rti, quote);
 }
 
 export function rtiSummary(IFs: Intervento[], rti: RtiConfig) {

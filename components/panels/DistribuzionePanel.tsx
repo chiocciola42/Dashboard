@@ -2,6 +2,7 @@
 import React from 'react';
 import type { Intervento, RtiPartner, Seniority } from '@/lib/types';
 import { aggregateByAmbito, aggregateByReferente, totalImporto } from '@/lib/distribuzione';
+import type { QuotePartner } from '@/lib/ripartizionePartner';
 import AmbitoTab from './distribuzione/AmbitoTab';
 import ReferenteTab from './distribuzione/ReferenteTab';
 import SeniorityTab from './distribuzione/SeniorityTab';
@@ -12,18 +13,20 @@ function DistribuzionePanel({
   IFs,
   seniority,
   partners,
+  quote,
   distSub,
   setDistSub,
 }: {
   IFs: Intervento[];
   seniority: Seniority[];
   partners: RtiPartner[];
+  quote?: QuotePartner;
   distSub: number;
   setDistSub: (n: number) => void;
 }) {
   const tot = totalImporto(IFs);
   const ae = aggregateByAmbito(IFs);
-  const re = aggregateByReferente(IFs, partners.map((p) => p.name));
+  const re = aggregateByReferente(IFs, partners.map((p) => p.name), quote);
 
   return (
     <div className="panel on" data-p="3">
