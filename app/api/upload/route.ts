@@ -9,7 +9,7 @@ import { persistReportRdiFromUpload } from '@/lib/reportRdiStore';
 import { persistVerbaliAperturaFromUpload } from '@/lib/verbaliAperturaStore';
 import { persistVerbaliSalFromUpload } from '@/lib/verbaliSalStore';
 import { persistReportPdcFromUpload } from '@/lib/reportPdcStore';
-import { getSeniority, setSeniority } from '@/lib/portfolio';
+import { getSeniorityStrict, saveSeniority } from '@/lib/portfolio';
 import { mergeTariffe } from '@/lib/seniority';
 import { persistGdlFromUpload } from '@/lib/gdlStore';
 import { updateMeta } from '@/lib/config';
@@ -282,8 +282,10 @@ async function applyParsedUntimed(parsed: ParseOutput, force: boolean) {
     mesiSaved = res.rows;
   }
   if (parsed.seniority && parsed.seniority.length) {
-    // Le tariffe già impostate in admin sopravvivono al caricamento (il file non le porta).
-    await setSeniority(mergeTariffe(await getSeniority(), parsed.seniority));
+    // Le tariffe di gara si cambiano solo a mano: il caricamento le conserva tutte. Lettura e
+    // scrittura sono "strict": se il database non risponde l'upload fallisce, invece di
+    // ripartire dal seed e riscrivere la tabella senza le tariffe.
+    await saveSeniority(mergeTariffe(await getSeniorityStrict(), parsed.seniority));
   }
 
   let gdlSaved = 0;

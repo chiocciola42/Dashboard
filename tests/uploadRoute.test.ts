@@ -248,9 +248,20 @@ describe('POST /api/upload — GdL and seniority', () => {
     expect(res.status).toBe(413);
   });
 
-  it('REGRESSION: tariffs set in admin survive an Aggregatore upload', async () => {
+  it('REGRESSION: tariffs set by hand survive an Aggregatore upload, even if the file carries a different one', async () => {
     await setSeniority([{ figura: 'Strategy Consultant', code: 'SC', gg: 1, tariffa: 450 }]);
-    await send({ kind: 'aggregatore', seniority: [{ figura: 'Strategy Consultant', code: 'SC', gg: 99, tariffa: null }], gdl: [riga()] });
+    await send({ kind: 'aggregatore', seniority: [{ figura: 'Strategy Consultant', code: 'SC', gg: 99, tariffa: 999 }], gdl: [riga()] });
     expect(await getSeniority()).toEqual([{ figura: 'Strategy Consultant', code: 'SC', gg: 99, tariffa: 450 }]);
+  });
+
+  it('REGRESSION: a figure with a tariff that is not in the uploaded file stays in the table', async () => {
+    await setSeniority([
+      { figura: 'Strategy Consultant', code: 'SC', gg: 1, tariffa: 450 },
+      { figura: 'Team Leader', code: 'TL', gg: 5, tariffa: 530 },
+    ]);
+    await send({ kind: 'aggregatore', seniority: [{ figura: 'Strategy Consultant', code: 'SC', gg: 99, tariffa: null }], gdl: [riga()] });
+    const table = await getSeniority();
+    expect(table.find((x) => x.figura === 'Team Leader')).toMatchObject({ tariffa: 530, gg: 0 });
+    expect(table.find((x) => x.figura === 'Strategy Consultant')).toMatchObject({ tariffa: 450, gg: 99 });
   });
 });

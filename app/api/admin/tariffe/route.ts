@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
 import { getSessionUser, isAdmin } from '@/lib/auth';
-import { getSeniority, setSeniority } from '@/lib/portfolio';
+import { getSeniority, saveSeniority } from '@/lib/portfolio';
 import { DASHBOARD_DATA_TAG } from '@/lib/getDashboardData';
 import type { Seniority } from '@/lib/types';
 
@@ -33,7 +33,8 @@ export async function PUT(req: Request) {
     gg: Number(r.gg) || 0,
     tariffa: r.tariffa == null || (r.tariffa as unknown) === '' ? null : Number(r.tariffa),
   }));
-  const saved = await setSeniority(rows);
+  // Modifica manuale: se il database non salva, l'errore emerge invece di un "ok" falso.
+  const saved = await saveSeniority(rows);
   revalidateTag(DASHBOARD_DATA_TAG);
   return NextResponse.json({ ok: true, seniority: saved });
 }

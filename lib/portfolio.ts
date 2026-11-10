@@ -1,5 +1,5 @@
 import { SEED_SENIORITY, SEED_MODALITA, SEED_TIMELINE } from './seed';
-import { getSetting, setSetting } from './settings';
+import { getSetting, getSettingStrict, setSetting, setSettingStrict } from './settings';
 import type { Seniority, ModalitaAgg, Timeline } from './types';
 
 // Portfolio-level aggregates (seniority/tariffe mix, modalità split, revenue
@@ -12,6 +12,16 @@ export async function getSeniority(): Promise<Seniority[]> {
 export async function setSeniority(s: Seniority[]): Promise<Seniority[]> {
   if (!s.length) return getSeniority();
   return setSetting<Seniority[]>('seniority', s);
+}
+
+// Lettura e scrittura della tabella figure/tariffe per i percorsi che MODIFICANO i dati (upload,
+// admin): un errore del database si propaga, mai ripiego sul seed seguito da una riscrittura.
+export async function getSeniorityStrict(): Promise<Seniority[]> {
+  return getSettingStrict<Seniority[]>('seniority', SEED_SENIORITY);
+}
+export async function saveSeniority(s: Seniority[]): Promise<Seniority[]> {
+  if (!s.length) return getSeniorityStrict();
+  return setSettingStrict<Seniority[]>('seniority', s);
 }
 
 export async function getModalita(): Promise<ModalitaAgg[]> {
