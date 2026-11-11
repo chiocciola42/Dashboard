@@ -12,10 +12,9 @@ import RtiSummaryTable from './rti/RtiSummaryTable';
 import {
   buildRtiBulletsHtml,
   buildRtiSummaryLine,
-  buildEroTotalPctHtml,
-  buildEroTotalEurHtml,
-  buildEroQuotaPctHtml,
-  buildEroQuotaEurHtml,
+  buildPaceHtml,
+  buildMiniGridHtml,
+  buildQuotaBarsHtml,
 } from './rti/rtiHtml';
 
 function RTIPanel({
@@ -42,15 +41,14 @@ function RTIPanel({
   onUpdateRti: (u: { massimale_totale: number; quota_intellera_pct: number; quota_deloitte_pct: number }) => void;
 }) {
   const e = computeRtiErosion(IFs, rti, meta, Date.now(), quote);
-  const { ceil, quotaErosion, totalRealPct, totalRealEur } = e;
+  const { ceil, quotaErosion, totalRealEur } = e;
   const selP = rtiSel || (filtersForn && quotaVal[filtersForn] ? filtersForn : null);
 
   const bulletsHtml = buildRtiBulletsHtml(rti, e, selP);
   const summaryLineHtml = buildRtiSummaryLine(e);
-  const eroTotalPctHtml = buildEroTotalPctHtml(e);
-  const eroTotalEurHtml = buildEroTotalEurHtml(e);
-  const eroQuotaPctHtml = buildEroQuotaPctHtml(e);
-  const eroQuotaEurHtml = buildEroQuotaEurHtml(e);
+  const paceHtml = buildPaceHtml(e);
+  const miniGridHtml = buildMiniGridHtml(e);
+  const quotaBarsHtml = buildQuotaBarsHtml(e);
 
   const onBulletClick = (ev: React.MouseEvent<HTMLDivElement>) => {
     const target = (ev.target as HTMLElement).closest('[data-drill-rti]') as HTMLElement | null;
@@ -113,47 +111,39 @@ function RTIPanel({
         </div>
       </ChartCard>
       <ChartCard
-        title="Erosione teorica vs reale del massimale (%)"
-        caption="Ritmo di erosione lineare atteso dell'intero massimale contrattuale, confrontato con l'erosione reale totale maturata ad oggi — a prescindere da come si ripartisce tra le aziende del RTI"
-        filename="Erosione_teorica_vs_reale_massimale_pct"
+        title="Chi sta consumando la propria quota più in fretta del tempo?"
+        caption="Quota già impegnata (cerchio pieno) contro la quota che sarebbe consumata a ritmo lineare (cerchio vuoto) · ordinate per scarto"
+        filename="Erosione_ritmo_per_azienda"
       >
         <Html
-          ariaLabel={`Erosione teorica lineare vs reale del massimale contrattuale, in percentuale. Reale a oggi ${totalRealPct != null ? PCT(totalRealPct) : 'n/d'} contro un target teorico del 100% a fine contratto.`}
-          html={eroTotalPctHtml}
-        />
-      </ChartCard>
-      <ChartCard
-        title="Erosione teorica vs reale del massimale (valore)"
-        caption="Stesso confronto in valore assoluto sull'intero massimale contrattuale"
-        filename="Erosione_teorica_vs_reale_massimale_valore"
-      >
-        <Html
-          ariaLabel={`Erosione teorica lineare vs reale del massimale contrattuale, in valore. Reale a oggi ${totalRealEur != null ? EURM(totalRealEur) : 'n/d'} contro un massimale di ${EURM(ceil)}.`}
-          html={eroTotalEurHtml}
-        />
-      </ChartCard>
-      <ChartCard
-        title="Erosione teorica vs reale delle quote per azienda (%)"
-        caption="Ritmo di erosione lineare atteso della quota di ciascuna azienda rispetto alla propria quota (mai rispetto al massimale totale), confrontato con l'erosione reale maturata ad oggi"
-        filename="Erosione_teorica_vs_reale_quote_pct"
-      >
-        <Html
-          ariaLabel={`Erosione teorica lineare vs reale delle quote, in percentuale, per azienda. ${quotaErosion
-            .map((s) => `${s.name}: reale a oggi ${s.realPct != null ? PCT(s.realPct) : 'n/d'} contro un target teorico del 100% della propria quota a fine contratto`)
+          ariaLabel={`Ritmo di erosione rispetto al tempo contrattuale trascorso (${PCT(e.theoreticalTodayPct)}). ${e.summaryRows
+            .map((s) => `${s.label}: ${s.realPct != null ? `reale ${PCT(s.realPct)}, scarto ${(s.realPct - e.theoreticalTodayPct).toFixed(1)} punti percentuali` : 'contratto non iniziato'}`)
             .join('; ')}.`}
-          html={eroQuotaPctHtml}
+          html={paceHtml}
         />
       </ChartCard>
       <ChartCard
-        title="Erosione teorica vs reale delle quote per azienda (valore)"
-        caption="Stesso confronto in valore assoluto, per azienda: traiettoria teorica lineare della propria quota contrattuale rispetto al proprio impegnato reale"
-        filename="Erosione_teorica_vs_reale_quote_valore"
+        title="Come evolve nel tempo l'erosione di ogni azienda?"
+        caption="Una linea per azienda (e per il totale), tutte sulla stessa scala: erosione reale, ritmo teorico e proiezione a fine contratto"
+        filename="Erosione_andamento_per_azienda"
       >
         <Html
-          ariaLabel={`Erosione teorica lineare vs reale delle quote, in valore, per azienda. ${quotaErosion
-            .map((s) => `${s.name}: reale a oggi ${s.realEur != null ? EURM(s.realEur) : 'n/d'} contro una quota contrattuale di ${EURM(s.quota)}`)
+          ariaLabel={`Andamento dell'erosione nel tempo, una mini-serie per ogni azienda. ${quotaErosion
+            .map((s) => `${s.name}: reale a oggi ${s.realPct != null ? PCT(s.realPct) : 'n/d'}${s.projectedPct != null ? `, proiezione a fine contratto ${PCT(s.projectedPct)}` : ''}`)
             .join('; ')}.`}
-          html={eroQuotaEurHtml}
+          html={miniGridHtml}
+        />
+      </ChartCard>
+      <ChartCard
+        title="Quanto resta da impegnare a ciascuna azienda?"
+        caption="Valori in euro su scala comune: impegnato e residuo di ogni quota contrattuale, con il tick del teorico a oggi"
+        filename="Erosione_quote_valore"
+      >
+        <Html
+          ariaLabel={`Impegnato e residuo in euro per azienda. ${quotaErosion
+            .map((s) => `${s.name}: ${s.realEur != null ? `impegnato ${EURM(s.realEur)}` : 'non iniziato'} su una quota di ${EURM(s.quota)}`)
+            .join('; ')}. Massimale totale ${EURM(ceil)}, impegnato ${totalRealEur != null ? EURM(totalRealEur) : 'n/d'}.`}
+          html={quotaBarsHtml}
         />
       </ChartCard>
       <RtiSummaryTable summaryRows={e.summaryRows} theoreticalTodayPct={e.theoreticalTodayPct} meta={meta} />

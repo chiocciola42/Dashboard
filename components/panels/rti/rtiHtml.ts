@@ -3,7 +3,7 @@ import { EURM, PCT, FCOL, C } from '@/lib/format';
 import { legchips, esc } from '@/lib/charts';
 import { chartRtiBullets } from '@/lib/chartsInsight';
 import type { RtiErosion } from '@/lib/rtiErosion';
-import { buildErosionProjectionChart } from './rtiCharts';
+import { buildPaceDumbbell, buildErosionMini, buildQuotaBars, sharedPctMax, type PaceRow } from './rtiCharts';
 
 // Totale contratto + un bullet per OGNI partner dell'RTI (righe = rti.partners), ciascuno
 // contro la propria quota, con composizione del massimale e tempo trascorso.
@@ -44,131 +44,76 @@ export function buildRtiSummaryLine(e: RtiErosion): string {
   )}</span></span><span>Impegnato totale <b>${EURM(totImpegnato)}</b> (${PCT(eroTotPct)})</span><span>${resid}</span></div>`;
 }
 
-export function buildEroTotalPctHtml(e: RtiErosion): string {
-  const { contractStartMs, contractEndMs, nowMs, totalRealPct, totalProjectedPct, TOTAL_COLOR } = e;
-  const eroTotalPctSvg = buildErosionProjectionChart(
-    contractStartMs,
-    contractEndMs,
-    nowMs,
-    [{ name: 'Totale contratto', color: TOTAL_COLOR, theoreticalEnd: 100, realToday: totalRealPct }],
-    'pct',
-    false,
-  );
+const legend = (items: string): string =>
+  `<div style="display:flex;gap:9px 20px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:14px">${items}</div>`;
 
-  const totalDeltaHtml = (() => {
-    if (totalProjectedPct == null) return '';
-    const delta = totalProjectedPct - 100;
-    const sign = delta >= 0 ? '+' : '';
-    const word = delta >= 0 ? 'supererebbe il massimale a questo ritmo' : 'resterebbe sotto il massimale a questo ritmo';
-    return `<div style="max-width:320px;border:1px solid var(--line);border-radius:12px;padding:12px 14px;border-left:3px solid ${TOTAL_COLOR}">
-      <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700">Totale contratto · proiezione a fine contratto</div>
-      <div style="font-size:19px;font-weight:800;font-family:'SFMono-Regular',monospace;color:${TOTAL_COLOR}">${sign}${delta.toFixed(1)} p.p.</div>
-      <div style="font-size:12px;color:var(--muted)">${word}</div>
-    </div>`;
-  })();
-
-  const eroTotalPctHtml = `<div>
-    ${eroTotalPctSvg}
-    <div style="display:flex;gap:9px 20px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:14px">${legchips([
-      { c: TOTAL_COLOR, t: 'Ritmo teorico lineare (0→100% del massimale)', dash: true },
-      { c: TOTAL_COLOR, t: 'Totale contratto · reale', line: true },
-    ])}</div>
-    ${totalDeltaHtml ? `<div style="margin-top:16px">${totalDeltaHtml}</div>` : ''}
-    <div style="font-size:11px;color:var(--muted);margin-top:14px">
-      Erosione dell'intero massimale contrattuale, indipendente dalla ripartizione tra le aziende del RTI. Tratto continuo = erosione reale a oggi, tratteggiato = proiezione a fine contratto mantenendo il ritmo attuale.
-    </div>
-  </div>`;
-  return eroTotalPctHtml;
+// Righe del dumbbell: Totale contratto in testa, poi le aziende ordinate per scarto
+// (reale − teorico a oggi) decrescente; quelle senza dato in fondo.
+export function paceRows(e: RtiErosion): PaceRow[] {
+  const toRow = (r: RtiErosion['summaryRows'][number], isTotal: boolean): PaceRow => ({
+    name: r.label, color: r.color, realPct: r.realPct, projectedPct: r.projectedPct, realEur: r.realEur, quota: r.quota, isTotal,
+  });
+  const total = toRow(e.summaryRows[e.summaryRows.length - 1], true);
+  const partners = e.summaryRows.slice(0, -1).map((r) => toRow(r, false));
+  const gap = (r: PaceRow): number => (r.realPct == null ? -Infinity : r.realPct - e.theoreticalTodayPct);
+  partners.sort((a, b) => gap(b) - gap(a));
+  return [total, ...partners];
 }
 
-export function buildEroTotalEurHtml(e: RtiErosion): string {
-  const { contractStartMs, contractEndMs, nowMs, ceil, totalRealEur, TOTAL_COLOR } = e;
-  const eroTotalEurSvg = buildErosionProjectionChart(
-    contractStartMs,
-    contractEndMs,
-    nowMs,
-    [{ name: 'Totale contratto', color: TOTAL_COLOR, theoreticalEnd: ceil, realToday: totalRealEur }],
-    'eur',
-    false,
-  );
-
-  const eroTotalEurHtml = `<div>
-    ${eroTotalEurSvg}
-    <div style="display:flex;gap:9px 20px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:14px">${legchips([
-      { c: TOTAL_COLOR, t: 'Massimale · ritmo teorico lineare', dash: true },
-      { c: TOTAL_COLOR, t: 'Totale contratto · reale', line: true },
-    ])}</div>
+export function buildPaceHtml(e: RtiErosion): string {
+  const chip = (style: string, t: string): string => `<span class="chip"><span class="dot" style="${style}"></span>${esc(t)}</span>`;
+  return `<div>
+    ${buildPaceDumbbell(paceRows(e), e.theoreticalTodayPct)}
+    ${legend(
+      chip(`background:#fff;border:2px solid ${C.ink}`, `Teorico a oggi (${PCT(e.theoreticalTodayPct)} del tempo trascorso)`) +
+        chip(`background:${C.good}`, 'Reale · sotto soglia') +
+        chip(`background:${C.amberD}`, 'Reale · attenzione ≥ 75%') +
+        chip(`background:${C.bad}`, 'Reale · critico ≥ 90%'),
+    )}
     <div style="font-size:11px;color:var(--muted);margin-top:14px">
-      Stesso confronto in valore assoluto sull'intero massimale contrattuale.
+      Ogni riga confronta la quota già impegnata con la quota che sarebbe consumata a ritmo lineare. Il segmento è la distanza tra i due: più è lungo verso destra, più l'azienda sta consumando più in fretta del tempo.
     </div>
   </div>`;
-  return eroTotalEurHtml;
 }
 
-export function buildEroQuotaPctHtml(e: RtiErosion): string {
-  const { contractStartMs, contractEndMs, nowMs, quotaErosion } = e;
-  const eroQuotaPctSvg = buildErosionProjectionChart(
-    contractStartMs,
-    contractEndMs,
-    nowMs,
-    quotaErosion.map((s) => ({ name: s.name, color: s.color, theoreticalEnd: 100, realToday: s.realPct })),
-    'pct',
-    true,
-  );
-
-  const quotaDeltaHtml = quotaErosion
-    .map((s) => {
-      if (s.projectedPct == null) return '';
-      const delta = s.projectedPct - 100;
-      const sign = delta >= 0 ? '+' : '';
-      const word = delta >= 0 ? 'supererebbe la propria quota a questo ritmo' : 'resterebbe sotto la propria quota a questo ritmo';
-      return `<div style="flex:1;min-width:190px;border:1px solid var(--line);border-radius:12px;padding:12px 14px;border-left:3px solid ${s.color}">
-        <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700">${esc(s.name)} · proiezione a fine contratto</div>
-        <div style="font-size:19px;font-weight:800;font-family:'SFMono-Regular',monospace;color:${s.color}">${sign}${delta.toFixed(1)} p.p.</div>
-        <div style="font-size:12px;color:var(--muted)">${word}</div>
-      </div>`;
-    })
+export function buildMiniGridHtml(e: RtiErosion): string {
+  const total = e.summaryRows[e.summaryRows.length - 1];
+  const series = [
+    { name: total.label, color: total.color, realToday: total.realPct, quota: total.quota },
+    ...e.quotaErosion.map((s) => ({ name: s.name, color: s.color, realToday: s.realPct, quota: s.quota })),
+  ];
+  const maxV = sharedPctMax(series, e.contractStartMs, e.contractEndMs, e.nowMs);
+  const cells = series
+    .map((s) => `<div class="erocell">${buildErosionMini(e.contractStartMs, e.contractEndMs, e.nowMs, s, maxV)}</div>`)
     .join('');
-
-  const eroQuotaPctHtml = `<div>
-    ${eroQuotaPctSvg}
-    <div style="display:flex;gap:9px 20px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:14px">${legchips(
-      [
-        { c: C.muted, t: 'Ritmo teorico lineare (0→100% della propria quota)', dash: true },
-        ...quotaErosion.map((s) => ({ c: s.color, t: `${s.name} · reale`, line: true })),
-      ],
-    )}</div>
-    ${quotaDeltaHtml ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">${quotaDeltaHtml}</div>` : ''}
-    <div style="font-size:11px;color:var(--muted);margin-top:14px">
-      Ogni azienda confrontata solo con la propria quota contrattuale, mai con il massimale totale: comparabile anche tra quote di dimensione diversa. Tratto continuo = erosione reale a oggi, tratteggiato = proiezione a fine contratto mantenendo il ritmo attuale.
-    </div>
-  </div>`;
-  return eroQuotaPctHtml;
-}
-
-export function buildEroQuotaEurHtml(e: RtiErosion): string {
-  const { contractStartMs, contractEndMs, nowMs, quotaErosion } = e;
-  const eroQuotaEurSvg = buildErosionProjectionChart(
-    contractStartMs,
-    contractEndMs,
-    nowMs,
-    quotaErosion.map((s) => ({ name: s.name, color: s.color, theoreticalEnd: s.quota, realToday: s.realEur })),
-    'eur',
-    false,
-  );
-
-  const eroQuotaEurHtml = `<div>
-    ${eroQuotaEurSvg}
-    <div style="display:flex;gap:9px 20px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:14px">${legchips(
-      quotaErosion.flatMap((s) => [
-        { c: s.color, t: `${s.name} · teorico`, dash: true },
-        { c: s.color, t: `${s.name} · reale`, line: true },
+  return `<div>
+    <div class="erogrid">${cells}</div>
+    ${legend(
+      legchips([
+        { c: C.slateL, t: 'Ritmo teorico lineare (0 → 100% della propria quota)', dash: true },
+        { c: C.ink, t: 'Reale fino a oggi', line: true },
+        { c: C.ink, t: 'Proiezione a fine contratto al ritmo attuale', dash: true },
       ]),
-    )}</div>
+    )}
     <div style="font-size:11px;color:var(--muted);margin-top:14px">
-      Stesso confronto in valore assoluto: tratteggiata sottile = ritmo teorico lineare della propria quota, continua = impegnato reale, tratteggiata spessa = proiezione a fine contratto al ritmo attuale.
+      Stessa scala verticale in tutti i riquadri (% della propria quota, mai del massimale totale): le linee sono confrontabili a colpo d'occhio. La linea ambra verticale segna oggi.
     </div>
   </div>`;
-  return eroQuotaEurHtml;
 }
 
+export function buildQuotaBarsHtml(e: RtiErosion): string {
+  const rows = e.quotaErosion
+    .map((s) => ({ name: s.name, color: s.color, quota: s.quota, realEur: s.realEur }))
+    .sort((a, b) => b.quota - a.quota);
+  return `<div>
+    ${buildQuotaBars(rows, e.theoreticalTodayPct)}
+    ${legend(
+      legchips([
+        { c: C.petrol, t: 'Impegnato (colore dell\u2019azienda)' },
+        { c: C.line, t: 'Residuo della quota' },
+        { c: C.bad, t: 'Sforamento oltre la quota' },
+        { c: C.ink, t: 'Teorico a oggi (ritmo lineare)', line: true },
+      ]),
+    )}
+  </div>`;
+}
