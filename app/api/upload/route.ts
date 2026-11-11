@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
 import { emptyImportError, parseFile, type FileKind, type ParseOutput } from '@/lib/parsers';
 import { normalizeFornitore } from '@/lib/parsers/util';
-import { upsertInterventiFromUpload, listInterventiBase } from '@/lib/store';
+import { upsertInterventiFromUpload, listInterventiBase, softDeleteIntervento } from '@/lib/store';
+import { ifAssenti } from '@/lib/sincronizzaIf';
 import { persistBefFromUpload } from '@/lib/befStore';
 import { persistReportBdoFromUpload } from '@/lib/reportBdoStore';
 import { persistReportRdiFromUpload } from '@/lib/reportRdiStore';
@@ -260,8 +261,8 @@ function normalizeIntervento(raw: unknown): Intervento | null {
 
 // Apply a parsed payload (from either the server-side parser or a client-side
 // parse) to the store and return the upload summary.
-async function applyParsed(parsed: ParseOutput, force: boolean) {
-  return timed('upload', () => applyParsedUntimed(parsed, force), (r) => ({
+async function applyParsed(parsed: ParseOutput, force: boolean, sync = false) {
+  return timed('upload', () => applyParsedUntimed(parsed, force, sync), (r) => ({
     kind: parsed.kind,
     inserted: r.inserted,
     updated: r.updated,
@@ -279,7 +280,24 @@ async function loadBdoToIf(): Promise<Map<string, string>> {
   return map;
 }
 
-async function applyParsedUntimed(parsed: ParseOutput, force: boolean) {
+// Un file Aggregatore contiene l'elenco completo degli IF: quelli dell'app che il file non ha
+// vengono segnalati e, con `sync`, archiviati (soft-delete, recuperabili). Gli IF modificati a mano
+// restano finché non si usa `force`. Senza IF nel file non si tocca nulla.
+async function reconcileAbsentIfs(parsed: ParseOutput, force: boolean, sync: boolean) {
+  const none = { absent: [] as string[], archived: [] as string[], preserved: [] as string[] };
+  if (parsed.kind !== 'aggregatore' || !parsed.interventi?.length) return none;
+  const nelFile = new Set(parsed.interventi.map((i) => i.numero_if));
+  const { archiviabili, preservati } = ifAssenti(await listInterventiBase(), nelFile, force);
+  const absent = [...archiviabili, ...preservati];
+  if (!sync) return { absent, archived: [], preserved: preservati };
+  const archived: string[] = [];
+  for (const id of archiviabili) {
+    if (await softDeleteIntervento(id)) archived.push(id);
+  }
+  return { absent, archived, preserved: preservati };
+}
+
+async function applyParsedUntimed(parsed: ParseOutput, force: boolean, sync = false) {
   const errors: string[] = [];
   let inserted = 0;
   let updated = 0;
@@ -297,6 +315,7 @@ async function applyParsedUntimed(parsed: ParseOutput, force: boolean) {
     updatedIfs = res.updatedIfs;
     skippedIfs = res.skippedIfs;
   }
+  const absentIfs = await reconcileAbsentIfs(parsed, force, sync);
   // Monthly revenue: only for the IFs this upload actually wrote (inserted or
   // updated) — manually edited records it skipped keep their months too.
   let mesiSaved = 0;
@@ -397,6 +416,9 @@ async function applyParsedUntimed(parsed: ParseOutput, force: boolean) {
     insertedIfs,
     updatedIfs,
     skippedIfs,
+    absent_ifs: absentIfs.absent,
+    archived_ifs: absentIfs.archived,
+    absent_preserved_ifs: absentIfs.preserved,
     bef_saved: befSaved,
     bef_ifs: befIfs,
     report_bdo_saved: reportBdoSaved,
@@ -429,13 +451,14 @@ export async function POST(req: Request) {
 
   const url = new URL(req.url);
   const force = url.searchParams.get('force') === 'true';
+  const sync = url.searchParams.get('sync') === 'true';
   const contentType = req.headers.get('content-type') || '';
 
   // --- JSON path: the workbook was parsed in the browser and only the
   // extracted records are sent. Avoids the platform request-body size limit
   // that blocks large (>4.5MB) raw spreadsheet uploads to serverless functions.
-  if (contentType.includes('application/json')) return handleJsonUpload(req, force);
-  return handleMultipartUpload(req, force);
+  if (contentType.includes('application/json')) return handleJsonUpload(req, force, sync);
+  return handleMultipartUpload(req, force, sync);
 }
 
 type JsonUploadBody = {
@@ -484,7 +507,7 @@ async function legacyMesiFacts(rawInterventi: unknown[], annoRaw: unknown) {
   });
 }
 
-async function handleJsonUpload(req: Request, force: boolean) {
+async function handleJsonUpload(req: Request, force: boolean, sync: boolean) {
   let body: JsonUploadBody;
   try {
     body = await req.json();
@@ -532,12 +555,12 @@ async function handleJsonUpload(req: Request, force: boolean) {
   };
   const empty = emptyImportError(parsed);
   if (empty) return fail(empty, 422);
-  const summary = await applyParsed(parsed, force);
+  const summary = await applyParsed(parsed, force, sync);
   return NextResponse.json({ ok: true, kind, filename: body.filename ?? null, force, ...summary });
 }
 
 // Small files parsed server-side (kept for compatibility).
-async function handleMultipartUpload(req: Request, force: boolean) {
+async function handleMultipartUpload(req: Request, force: boolean, sync: boolean) {
   let form: FormData;
   try {
     form = await req.formData();
@@ -566,6 +589,6 @@ async function handleMultipartUpload(req: Request, force: boolean) {
 
   const empty = emptyImportError(parsed);
   if (empty) return fail(empty, 422);
-  const summary = await applyParsed(parsed, force);
+  const summary = await applyParsed(parsed, force, sync);
   return NextResponse.json({ ok: true, kind: parsed.kind, filename, force, ...summary });
 }

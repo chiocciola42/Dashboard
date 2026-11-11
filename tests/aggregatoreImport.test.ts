@@ -6,6 +6,7 @@ import { getDashboardData } from '@/lib/getDashboardData';
 import { sumByPartner } from '@/lib/rtiErosion';
 import { conta } from '@/lib/riconciliazione';
 import { parseFile } from '@/lib/parsers';
+import { createIntervento } from '@/lib/store';
 import { workbook, type Cell } from './helpers/xlsx';
 
 // Importazione end-to-end dell'Aggregatore: file -> /api/upload -> store -> payload della dashboard.
@@ -49,15 +50,17 @@ const sintetico = () =>
     'Anagrafica IF': [ANAG, [20260001, 'IF uno', 'Prevenzione', 'SI', null, 'Attiva'], [20260003, 'IF tre', 'FSE e Presa in Carico', 'NO', null, 'Attiva']],
   });
 
-async function carica(buf: Buffer, nome = 'Aggregatore_Dati_ARIA.xlsm'): Promise<Record<string, unknown>> {
+async function carica(buf: Buffer, nome = 'Aggregatore_Dati_ARIA.xlsm', query = '?force=true'): Promise<Record<string, unknown>> {
   const form = new FormData();
   form.set('file', new File([new Uint8Array(buf)], nome));
-  const res = await POST(new Request('http://localhost/api/upload?force=true', { method: 'POST', body: form }));
+  const res = await POST(new Request(`http://localhost/api/upload${query}`, { method: 'POST', body: form }));
   const body = (await res.json()) as Record<string, unknown>;
   expect(res.status, JSON.stringify(body)).toBe(200);
   return body;
 }
 
+// Il payload aggiunge `impegnato` a rti (rtiSummary) oltre ai campi del tipo RtiConfig.
+const impegnatoDi = (d: { rti: unknown }): number => (d.rti as { impegnato: number }).impegnato;
 const somma = (xs: number[]) => xs.reduce((s, x) => s + x, 0);
 
 beforeEach(() => {
@@ -122,6 +125,53 @@ describe('Aggregatore: import completo e coerenza dei numeri', () => {
   });
 });
 
+describe('Aggregatore: IF dell\'app assenti dal file', () => {
+  const ID_FILE = ['20260001', '20260002', '20260003'];
+
+  it('REGRESSION: stale IFs keep inflating the totals unless the upload archives them', async () => {
+    const body = await carica(sintetico(), undefined, '?force=true');
+    // Il portafoglio di base contiene IF che il file non ha: sono segnalati ma restano.
+    expect((body.absent_ifs as string[]).length).toBeGreaterThan(0);
+    expect(body.archived_ifs).toEqual([]);
+    const d = await getDashboardData(2026);
+    expect(d.interventi.length).toBeGreaterThan(ID_FILE.length);
+  });
+
+  it('with sync=true the dashboard holds exactly the IFs of the file, and the total is the file total', async () => {
+    const body = await carica(sintetico(), undefined, '?force=true&sync=true');
+    expect((body.archived_ifs as string[]).length).toBe((body.absent_ifs as string[]).length);
+    const d = await getDashboardData(2026);
+    expect(d.interventi.map((i) => i.numero_if).sort()).toEqual(ID_FILE);
+    expect(d.kpi.count).toBe(3);
+    expect(d.kpi.totale).toBeCloseTo(2000.5, 2);
+    expect(impegnatoDi(d)).toBeCloseTo(2000.5, 2);
+  });
+
+  it('keeps manually edited IFs without force, and archives them with force', async () => {
+    await createIntervento({ numero_if: 'MANUALE', titolo: 'Inserito a mano', importo: 77 });
+    const soft = await carica(sintetico(), undefined, '?sync=true');
+    expect(soft.absent_preserved_ifs).toContain('MANUALE');
+    expect((await getDashboardData(2026)).interventi.some((i) => i.numero_if === 'MANUALE')).toBe(true);
+    await carica(sintetico(), undefined, '?force=true&sync=true');
+    expect((await getDashboardData(2026)).interventi.some((i) => i.numero_if === 'MANUALE')).toBe(false);
+  });
+
+  it('only an Aggregatore file can archive: another kind never reports or removes IFs', async () => {
+    const iff = { numero_if: '20269999', titolo: 'IF', fornitore: 'Intellera', importo: 1 };
+    const res = await POST(
+      new Request('http://localhost/api/upload?sync=true', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'if', interventi: [iff] }),
+      }),
+    );
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(res.status).toBe(200);
+    expect(body.absent_ifs).toEqual([]);
+    expect((await getDashboardData(2026)).interventi.length).toBeGreaterThan(1);
+  });
+});
+
 // Verifica opzionale sul file reale (dati di contratto: non è nel repository).
 //   AGGREGATORE_FILE=/percorso/Aggregatore.xlsm npx vitest run tests/aggregatoreImport.test.ts
 const FILE_REALE = process.env.AGGREGATORE_FILE;
@@ -151,10 +201,13 @@ function quadroConfig(buf: Buffer): { totale: number; perPartner: Record<string,
 describe.skipIf(!FILE_REALE)('Aggregatore reale: i numeri dell\'app coincidono con quelli del file', () => {
   it('imports the file and reconciles totals, partners and costs with the Config sheet', async () => {
     const buf = readFileSync(FILE_REALE as string);
-    const body = await carica(buf);
+    const body = await carica(buf, undefined, '?force=true&sync=true');
     expect(body.ok).toBe(true);
     const d = await getDashboardData(2026);
     const quadro = quadroConfig(buf);
+    // Con la sincronizzazione il portafoglio è esattamente quello del file: stesso totale ovunque.
+    expect(Math.abs(d.kpi.totale - quadro.totale)).toBeLessThan(0.5);
+    expect(Math.abs(impegnatoDi(d) - quadro.totale)).toBeLessThan(0.5);
     // Il portafoglio di base in memoria contiene altri IF: si confronta solo ciò che il file contiene.
     const nelFile = new Set((parseFile('Aggregatore.xlsm', buf).interventi ?? []).map((i) => i.numero_if));
     const mio = d.interventi.filter((i) => nelFile.has(i.numero_if));

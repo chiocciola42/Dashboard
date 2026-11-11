@@ -40,3 +40,21 @@ describe('vercel.json', () => {
     expect(vercel.regions).toEqual([expected]);
   });
 });
+
+describe('.vercelignore', () => {
+  const entries = read('.vercelignore')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'));
+
+  it('leaves out the documentation folder', () => {
+    expect(entries).toContain('docs/');
+  });
+
+  it('never excludes what the build needs', () => {
+    const needed = ['app', 'components', 'lib', 'public', 'drizzle', 'scripts', 'package.json', 'next.config.mjs', 'middleware.ts', 'instrumentation.ts'];
+    for (const n of needed) {
+      expect(entries.some((e) => e.replace(/^\/|\/$/g, '') === n || e === `${n}/**`), n).toBe(false);
+    }
+  });
+});
