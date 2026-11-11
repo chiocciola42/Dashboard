@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import RTIPanel from '@/components/panels/RTIPanel';
 import RtiConfigForm from '@/components/panels/rti/RtiConfigForm';
 import RtiSummaryTable from '@/components/panels/rti/RtiSummaryTable';
-import { buildErosionProjectionChart } from '@/components/panels/rti/rtiCharts';
+import { buildPaceDumbbell, buildErosionMini, buildQuotaBars, sharedPctMax } from '@/components/panels/rti/rtiCharts';
 import { computeRtiErosion } from '@/lib/rtiErosion';
 import { ChartInputError } from '@/lib/chartKit';
 import { chartRtiBullets } from '@/lib/chartsInsight';
@@ -44,10 +44,9 @@ describe('RTIPanel', () => {
     const t = text(renderToStaticMarkup(<RTIPanel {...base} />));
     for (const s of [
       "Quanta quota hanno consumato tutte le aziende dell'RTI rispetto al tempo trascorso?",
-      'Erosione teorica vs reale del massimale (%)',
-      'Erosione teorica vs reale del massimale (valore)',
-      'Erosione teorica vs reale delle quote per azienda (%)',
-      'Erosione teorica vs reale delle quote per azienda (valore)',
+      'Chi sta consumando la propria quota più in fretta del tempo?',
+      "Come evolve nel tempo l'erosione di ogni azienda?",
+      'Quanto resta da impegnare a ciascuna azienda?',
       'Riepilogo numerico',
     ]) expect(t).toContain(s);
   });
@@ -165,21 +164,54 @@ describe('RTI bullet chart (all partners)', () => {
 });
 
 describe('SVG chart builders', () => {
-  it('projection chart: draws a real and projected line per company with data', () => {
-    const t0 = Date.parse('2024-01-01'), t1 = Date.parse('2029-01-01'), now = Date.parse('2026-07-01');
-    const svg = buildErosionProjectionChart(t0, t1, now, [
-      { name: 'A', color: '#111', theoreticalEnd: 100, realToday: 20 },
-      { name: 'B', color: '#222', theoreticalEnd: 100, realToday: null },
-    ], 'pct', true);
+  const row = { name: 'A', color: '#111', realPct: 30, projectedPct: 60, realEur: 300, quota: 1000 };
+
+  it('dumbbell: gap in p.p. against the elapsed time, sorted input drawn as given', () => {
+    const svg = buildPaceDumbbell([{ ...row, isTotal: true }, { ...row, name: 'B', realPct: 10, realEur: 100, projectedPct: 20 }], 20);
     expect(svg.startsWith('<svg')).toBe(true);
-    expect(svg).toContain('stroke="#111"');
-    expect(svg).not.toContain('r="5.5" fill="#222"');
-    expect(svg).toContain('>oggi<');
+    expect(text(svg)).toContain('+10,0 p.p. avanti al ritmo');
+    expect(text(svg)).toContain('−10,0 p.p. sotto il ritmo');
+    expect(svg).not.toContain('NaN');
   });
 
-  it('projection chart: degenerate dates do not produce NaN coordinates', () => {
-    const t = Date.parse('2026-01-01');
-    const svg = buildErosionProjectionChart(t, t, t, [{ name: 'A', color: '#111', theoreticalEnd: 100, realToday: 10 }], 'pct', false);
+  it('dumbbell: before the contract starts only the theoretical marker is drawn', () => {
+    const svg = buildPaceDumbbell([{ ...row, realPct: null, projectedPct: null, realEur: null }], 0);
+    expect(text(svg)).toContain('Contratto non ancora iniziato');
     expect(svg).not.toContain('NaN');
+  });
+
+  it('dumbbell and bars handle no rows and reject non-finite input', () => {
+    expect(buildPaceDumbbell([], 10)).toContain('Nessun partner');
+    expect(buildQuotaBars([], 10)).toContain('Nessun partner');
+    expect(() => buildPaceDumbbell([{ ...row, realPct: NaN }], 10)).toThrow(ChartInputError);
+  });
+
+  it('mini chart: real line, dashed projection and a label with the end-of-contract value', () => {
+    const t0 = Date.parse('2024-01-01'), t1 = Date.parse('2029-01-01'), now = Date.parse('2026-07-01');
+    const svg = buildErosionMini(t0, t1, now, { name: 'A', color: '#111', realToday: 20 }, 100);
+    expect(svg).toContain('class="msvg mini"');
+    expect(svg).toContain('stroke="#111"');
+    expect(text(svg)).toContain('oggi 20,0%');
+    expect(text(svg)).toMatch(/≈ \d+%/);
+    expect(text(buildErosionMini(t0, t1, now, { name: 'B', color: '#222', realToday: null }, 100))).toContain('non iniziato');
+  });
+
+  it('mini chart: shared scale grows with an overrunning projection and caps at 200%', () => {
+    const t0 = Date.parse('2024-01-01'), t1 = Date.parse('2029-01-01'), now = Date.parse('2025-01-01');
+    expect(sharedPctMax([{ name: 'A', color: '#1', realToday: 10 }], t0, t1, now)).toBe(100);
+    expect(sharedPctMax([{ name: 'A', color: '#1', realToday: 90 }], t0, t1, now)).toBe(200);
+  });
+
+  it('mini chart: degenerate dates do not produce NaN coordinates', () => {
+    const t = Date.parse('2026-01-01');
+    expect(buildErosionMini(t, t, t, { name: 'A', color: '#111', realToday: 10 }, 100)).not.toContain('NaN');
+  });
+
+  it('bars: shows residual, flags the overrun beyond the quota', () => {
+    const ok = buildQuotaBars([{ name: 'A', color: '#111', quota: 1_000_000, realEur: 400_000 }], 50);
+    expect(text(ok)).toContain('Residuo € 0,60 Mln');
+    const over = buildQuotaBars([{ name: 'A', color: '#111', quota: 1_000_000, realEur: 1_300_000 }], 50);
+    expect(text(over)).toContain('Sforamento € 0,30 Mln');
+    expect(over).not.toContain('NaN');
   });
 });

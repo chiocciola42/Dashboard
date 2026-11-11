@@ -154,6 +154,8 @@ main{padding:16px 0 calc(60px + env(safe-area-inset-bottom));position:relative}
 .hval{font-family:'SFMono-Regular',monospace;font-weight:700;white-space:nowrap;color:var(--ink);font-size:12.5px}
 .hval .hsub{color:var(--muted);font-weight:500;margin-left:5px}
 .msvg{width:100%;height:auto;display:block}
+.erogrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px 18px}
+.erocell{border:1px solid var(--line);border-radius:12px;padding:8px 6px 2px}
 .hovcol:hover{fill:rgba(14,110,99,.06)!important}
 .subtabs{display:flex;gap:6px;border-bottom:1px solid var(--line);margin-bottom:var(--space);flex-wrap:wrap}
 .subtabs button{font-family:inherit;font-size:13.5px;font-weight:650;border:none;background:none;color:var(--muted);padding:11px 4px;margin-right:14px;border-bottom:2.5px solid transparent;cursor:pointer}
@@ -319,6 +321,7 @@ tbody tr:hover{background:#F5F8F7}
      this width — let the card scroll horizontally instead of squeezing labels */
   .card{overflow-x:auto;-webkit-overflow-scrolling:touch}
   .msvg{min-width:640px}
+  .msvg.mini{min-width:0}
   .donutsvg{min-width:0}
   /* the operational table has 13+ nowrap columns: on desktop that width is
      clipped on purpose, on mobile it must scroll instead of hiding data */
