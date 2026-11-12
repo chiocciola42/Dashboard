@@ -101,7 +101,7 @@ export const LEGENDA: readonly { colonna: string; formula: string; fonte: string
   {
     colonna: 'Σ gg × tariffa',
     formula: 'Σ (gg della riga × tariffa del profilo professionale) su tutte le righe del GdL dell\'IF',
-    fonte: 'Foglio «GdL - Gruppo di Lavoro» (giornate per figura) × tariffe di gara in Gestione dati › Figure professionali e tariffe. Non calcolata per gli IF a canone, pagati a canone e non a giornate',
+    fonte: 'Foglio «GdL - Gruppo di Lavoro» (giornate per figura) × tariffe di gara in Gestione dati › Figure professionali e tariffe',
   },
   {
     colonna: 'Σ Oggetto Fornitura',
