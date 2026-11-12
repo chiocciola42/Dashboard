@@ -195,10 +195,16 @@ function sommaCosti(linee: readonly FornituraRiga[] | undefined): number | null 
 
 // I tre confronti di un IF. Con la ricostruzione GG × profilo non eseguibile (giornate o tariffe
 // mancanti) i due confronti che la usano sono "non confrontabili" con il motivo.
-function esitiIf(numeroIf: string, previsto: number, costi: number | null, ric: Ricostruzione): Esito[] {
-  const gg = ric.ok ? ric.ricostruito : null;
-  const ammessoGg = ric.ok ? ric.ammesso : 0;
-  const motivoGg = ric.ok ? '' : ric.motivo;
+// Un IF a canone è pagato a canone mensile, non a giornate × tariffa: le giornate del GdL sono
+// informative e il loro prodotto per la tariffa di gara non ricostruisce il costo (nel file reale
+// l'importo di un canone è ~70% di gg × tariffa). Confrontarle darebbe una discrepanza falsa.
+export const MOTIVO_CANONE = 'IF a canone: costo a canone, non a giornate × tariffa';
+
+function esitiIf(numeroIf: string, previsto: number, costi: number | null, ric: Ricostruzione, canone: boolean): Esito[] {
+  const usaGg = ric.ok && !canone;
+  const gg = usaGg ? ric.ricostruito : null;
+  const ammessoGg = usaGg ? ric.ammesso : 0;
+  const motivoGg = canone ? MOTIVO_CANONE : ric.ok ? '' : ric.motivo;
   const motivoForn = 'costi di fornitura assenti o incompleti';
   return [
     confronta(meta('gen_gg', numeroIf), previsto, gg, ammessoGg, 'importo previsto assente', motivoGg),
@@ -208,10 +214,10 @@ function esitiIf(numeroIf: string, previsto: number, costi: number | null, ric: 
 }
 
 // Figure con giornate nel GdL ma senza tariffa: spiegano perché molti confronti non sono possibili.
-function figureSenzaTariffa(gdl: readonly GdlRiga[], tariffe: Tariffe): string[] {
+function figureSenzaTariffa(gdl: readonly GdlRiga[], tariffe: Tariffe, ifCanone: ReadonlySet<string>): string[] {
   const out = new Set<string>();
   for (const r of gdl) {
-    if (r.gg == null || !r.figura) continue;
+    if (r.gg == null || !r.figura || ifCanone.has(r.numero_if)) continue;
     if (!tariffe.has(figuraKey(r.figura))) out.add(r.figura);
   }
   return [...out].sort();
@@ -235,10 +241,14 @@ export function riconcilia(inp: RiconciliazioneInput): Riconciliazione {
   const tariffe = tariffeDa(inp.seniority);
   const gdl = raggruppa(inp.gdl, (r) => r.numero_if);
   const forn = raggruppa(inp.fornitura, (l) => l.numero_if);
+  const ifCanone = new Set<string>([
+    ...inp.gdl.filter((r) => r.tipo === 'canone').map((r) => r.numero_if),
+    ...inp.fornitura.filter((l) => l.modalita === 'canone').map((l) => l.numero_if),
+  ]);
   const esiti = inp.interventi.flatMap((i) =>
-    esitiIf(i.numero_if, i.importo, sommaCosti(forn.get(i.numero_if)), ricostruisci(gdl.get(i.numero_if) ?? [], tariffe)),
+    esitiIf(i.numero_if, i.importo, sommaCosti(forn.get(i.numero_if)), ricostruisci(gdl.get(i.numero_if) ?? [], tariffe), ifCanone.has(i.numero_if)),
   );
-  return { esiti, tariffeMancanti: figureSenzaTariffa(inp.gdl, tariffe), righe: { gdl: inp.gdl.length, fornitura: inp.fornitura.length } };
+  return { esiti, tariffeMancanti: figureSenzaTariffa(inp.gdl, tariffe, ifCanone), righe: { gdl: inp.gdl.length, fornitura: inp.fornitura.length } };
 }
 
 // Conteggio degli esiti per stato, opzionalmente di un solo confronto.

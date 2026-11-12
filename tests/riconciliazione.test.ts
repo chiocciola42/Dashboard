@@ -223,3 +223,22 @@ describe('proprietà e confini', () => {
     expect(() => riconcilia(input({ fornitura: new Array(MAX_RIGHE + 1).fill(f('A', 'X', 1)) }))).toThrow(/massimo/);
   });
 });
+
+describe('IF a canone', () => {
+  const gc = (gg: number | null): GdlRiga => ({ ...g('529', 'CAN01', 'Business Consultant Senior', gg), tipo: 'canone' });
+  const fc: FornituraRiga = { ...f('529', 'CAN01', 5927.84), modalita: 'canone' };
+
+  it('non confronta gg × tariffa: costo a canone, non a giornate', () => {
+    const r = riconcilia(input({ interventi: [{ numero_if: '529', importo: 5927.84 }], gdl: [gc(33.3)], fornitura: [fc] }));
+    const stato = (c: Confronto) => r.esiti.find((e) => e.confronto === c)!;
+    expect(stato('gen_forn').stato).toBe('quadra');
+    expect(stato('gen_gg').stato).toBe('non_confrontabile');
+    expect(stato('gen_gg').motivo).toContain('canone');
+    expect(stato('gg_forn').stato).toBe('non_confrontabile');
+  });
+
+  it('non segnala come mancanti le tariffe delle figure di un IF a canone', () => {
+    const r = riconcilia(input({ interventi: [{ numero_if: '529', importo: 5927.84 }], gdl: [{ ...gc(33.3), figura: 'Figura Solo Canone' }], fornitura: [fc] }));
+    expect(r.tariffeMancanti).toEqual([]);
+  });
+});

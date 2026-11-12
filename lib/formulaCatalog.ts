@@ -562,7 +562,7 @@ export const FORMULA_CATALOG: FormulaRow[] = [
     elemento: 'Valori confrontati (vista unica)',
     formula: 'Generalità = Importo Previsto dell\'IF; Fornitura = Σ costo complessivo delle linee di «Oggetto Fornitura»; GG × profilo = Σ (gg riga × tariffa del profilo)',
     spiegazione:
-      'Tre costi per IF, dalla stessa fornitura: le fonti devono coincidere salvo arrotondamenti. Se una sola riga manca di costo, giornate o tariffa il valore non è calcolato (mai una somma parziale).',
+      'Tre costi per IF, dalla stessa fornitura: le fonti devono coincidere salvo arrotondamenti. Se una sola riga manca di costo, giornate o tariffa il valore non è calcolato (mai una somma parziale). Gli IF a canone (codici CAN) sono pagati a canone, non a giornate × tariffa: per loro i due confronti con GG × profilo sono «non confrontabili» e resta solo Generalità ↔ Fornitura.',
     sorgenti: 'interventi.importo, fornitura_righe.costo_complessivo, gdl_righe.gg, app_config.seniority (tariffa)',
   },
   {
