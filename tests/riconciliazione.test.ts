@@ -225,20 +225,26 @@ describe('proprietà e confini', () => {
 });
 
 describe('IF a canone', () => {
-  const gc = (gg: number | null): GdlRiga => ({ ...g('529', 'CAN01', 'Business Consultant Senior', gg), tipo: 'canone' });
-  const fc: FornituraRiga = { ...f('529', 'CAN01', 5927.84), modalita: 'canone' };
+  const gc = (figura: string, gg: number | null): GdlRiga => ({ ...g('529', 'CAN01', figura, gg), tipo: 'canone' });
+  const fc = (costo: number): FornituraRiga => ({ ...f('529', 'CAN01', costo), modalita: 'canone' });
+  const stato = (r: ReturnType<typeof riconcilia>, c: Confronto) => r.esiti.find((e) => e.confronto === c)!;
 
-  it('non confronta gg × tariffa: costo a canone, non a giornate', () => {
-    const r = riconcilia(input({ interventi: [{ numero_if: '529', importo: 5927.84 }], gdl: [gc(33.3)], fornitura: [fc] }));
-    const stato = (c: Confronto) => r.esiti.find((e) => e.confronto === c)!;
-    expect(stato('gen_forn').stato).toBe('quadra');
-    expect(stato('gen_gg').stato).toBe('non_confrontabile');
-    expect(stato('gen_gg').motivo).toContain('canone');
-    expect(stato('gg_forn').stato).toBe('non_confrontabile');
+  it('quadra quando gg × profilo coincide con il totale dell\'intervento', () => {
+    // 33,3 gg × 267,02 = 8.891,77
+    const r = riconcilia(input({ interventi: [{ numero_if: '529', importo: 8891.77 }], gdl: [gc('Business Consultant Senior', 33.3)], fornitura: [fc(8891.77)] }));
+    expect(stato(r, 'gen_gg').stato).toBe('quadra');
+    expect(stato(r, 'gg_forn').stato).toBe('quadra');
   });
 
-  it('non segnala come mancanti le tariffe delle figure di un IF a canone', () => {
-    const r = riconcilia(input({ interventi: [{ numero_if: '529', importo: 5927.84 }], gdl: [{ ...gc(33.3), figura: 'Figura Solo Canone' }], fornitura: [fc] }));
-    expect(r.tariffeMancanti).toEqual([]);
+  it('segnala la discrepanza quando gg × profilo non coincide con il totale', () => {
+    const r = riconcilia(input({ interventi: [{ numero_if: '529', importo: 5927.84 }], gdl: [gc('Business Consultant Senior', 33.3)], fornitura: [fc(5927.84)] }));
+    expect(stato(r, 'gen_gg').stato).toBe('discrepanza');
+    expect(stato(r, 'gen_gg').differenza).toBeCloseTo(2963.93, 2);
+  });
+
+  it('con una riga senza giornate il confronto resta non confrontabile', () => {
+    const r = riconcilia(input({ interventi: [{ numero_if: '529', importo: 5927.84 }], gdl: [gc('Supporto in ambito X', null)], fornitura: [fc(5927.84)] }));
+    expect(stato(r, 'gen_gg').stato).toBe('non_confrontabile');
+    expect(stato(r, 'gen_gg').motivo).toContain('giornate mancanti');
   });
 });
